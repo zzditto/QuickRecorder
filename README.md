@@ -32,6 +32,12 @@ brew install lihaoyun6/tap/quickrecorder
 - The new **"[Presenter Overlay](https://support.apple.com/guide/facetime/presenter-overlay-video-conferencing-fctm6333f4bd/mac)"** in macOS 14 was fully supported by QuickRecorder, which can overlay the camera in real time on your recording *(macOS 12/13 can only use camera floating window)*  
 - QuickRecorder is able to record `HEVC with Alpha` video format, that can contain alpha channel in the output file *(currently only iMovie and FCPX support this feature)*  
 
+## Bug Fixes (Fork Version)
+This fork version fixes the following issues:
+- **Audio sampling rate compatibility**: Auto-limit sampling rate to 48000 Hz when exceeding AAC encoder limit (e.g., 96000 Hz)
+- **Audio settings crash**: Add default value handling for empty/invalid audio format settings
+- **Enhanced error handling**: Replace force unwraps with safe error handling to avoid crashes
+
 ## Q&A
 **1. Where can I reopen the main panel after closing it?**
 > Click the Dock tile or Menubar icon of QuickRecorder to reopen the main panel at any time.
