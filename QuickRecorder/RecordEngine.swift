@@ -294,7 +294,7 @@ extension AppDelegate {
             }
             try await SCContext.stream.startCapture()
         } catch {
-            assertionFailure("capture failed".local)
+            print("[Error] Capture failed: \(error)")
             return
         }
         if !audioOnly { registerGlobalMouseMonitor() }
@@ -312,7 +312,9 @@ extension AppDelegate {
             case AudioFormat.alac.rawValue: fileEnding = "m4a"
             case AudioFormat.flac.rawValue: fileEnding = "flac"; fileType = .caf
             case AudioFormat.opus.rawValue: fileEnding = "ogg"; fileType = .caf
-            default: assertionFailure("loaded unknown audio format: ".local + fileEnding)
+            default:
+                print("[Warning] Unknown audio format: '\(fileEnding)', using m4a as default")
+                fileEnding = "m4a"
         }
         let path = SCContext.getFilePath()
         if recordMic && SCContext.streamType == .systemaudio {
@@ -324,11 +326,22 @@ extension AppDelegate {
             try? fd.createDirectory(at: SCContext.filePath.url, withIntermediateDirectories: true, attributes: nil)
             try? jsonString.write(to: infoJsonURL, atomically: true, encoding: .utf8)
             
-            SCContext.audioFile = try! AVAudioFile(forWriting: SCContext.filePath1.url, settings: SCContext.updateAudioSettings(), commonFormat: .pcmFormatFloat32, interleaved: false)
+            do {
+                SCContext.audioFile = try AVAudioFile(forWriting: SCContext.filePath1.url, settings: SCContext.updateAudioSettings(), commonFormat: .pcmFormatFloat32, interleaved: false)
+            } catch {
+                print("[Error] Failed to create audio file for system audio: \(error)")
+                return
+            }
 
             let sampleRate = SCContext.getSampleRate() ?? 48000
             let settings = SCContext.updateAudioSettings(rate: sampleRate)
             SCContext.vW = try? AVAssetWriter.init(outputURL: SCContext.filePath2.url, fileType: fileType)
+            
+            guard SCContext.vW != nil else {
+                print("[Error] Failed to create AVAssetWriter for mic recording")
+                return
+            }
+            
             SCContext.micInput = AVAssetWriterInput(mediaType: AVMediaType.audio, outputSettings: settings)
             SCContext.micInput.expectsMediaDataInRealTime = true
             if SCContext.vW.canAdd(SCContext.micInput) { SCContext.vW.add(SCContext.micInput) }
@@ -337,7 +350,12 @@ extension AppDelegate {
         } else {
             SCContext.filePath = "\(path).\(fileEnding)"
             SCContext.filePath1 = SCContext.filePath
-            SCContext.audioFile = try! AVAudioFile(forWriting: SCContext.filePath.url, settings: SCContext.updateAudioSettings(), commonFormat: .pcmFormatFloat32, interleaved: false)
+            do {
+                SCContext.audioFile = try AVAudioFile(forWriting: SCContext.filePath.url, settings: SCContext.updateAudioSettings(), commonFormat: .pcmFormatFloat32, interleaved: false)
+            } catch {
+                print("[Error] Failed to create audio file: \(error)")
+                return
+            }
         }
     }
 }
@@ -363,11 +381,13 @@ extension AppDelegate {
         SCContext.startTime = nil
 
         let fileEnding = videoFormat.rawValue
-        var fileType: AVFileType?
+        var fileType: AVFileType
         switch fileEnding {
             case VideoFormat.mov.rawValue: fileType = AVFileType.mov
             case VideoFormat.mp4.rawValue: fileType = AVFileType.mp4
-            default: assertionFailure("loaded unknown video format".local)
+            default:
+                print("[Error] Unknown video format: \(fileEnding), using mp4 as default")
+                fileType = AVFileType.mp4
         }
 
         if remuxAudio && recordMic && recordWinSound {
@@ -375,7 +395,13 @@ extension AppDelegate {
         } else {
             SCContext.filePath = "\(SCContext.getFilePath()).\(fileEnding)"
         }
-        SCContext.vW = try? AVAssetWriter.init(outputURL: SCContext.filePath.url, fileType: fileType!)
+        SCContext.vW = try? AVAssetWriter.init(outputURL: SCContext.filePath.url, fileType: fileType)
+        
+        guard SCContext.vW != nil else {
+            print("[Error] Failed to create AVAssetWriter")
+            return
+        }
+        
         let encoderIsH265 = (encoder.rawValue == Encoder.h265.rawValue) || recordHDR
         let fpsMultiplier: Double = Double(frameRate)/8
         let encoderMultiplier: Double = encoderIsH265 ? 0.5 : 0.9
@@ -459,7 +485,11 @@ extension AppDelegate {
                         SCContext.micInput.append(buffer.asSampleBuffer!)
                     }
                 }
-                try! SCContext.audioEngine.start()
+                do {
+                    try SCContext.audioEngine.start()
+                } catch {
+                    print("[Error] Failed to start audio engine: \(error)")
+                }
             }
         } else {
             AudioRecorder.shared.setupAudioCapture()
@@ -607,7 +637,7 @@ extension AppDelegate {
                 if SCContext.startTime == nil { SCContext.startTime = Date.now }
                 guard let samples = SampleBuffer.asPCMBuffer else { return }
                 do { try SCContext.audioFile?.write(from: samples) }
-                catch { assertionFailure("audio file writing issue".local) }
+                catch { print("[Error] Audio file writing issue: \(error)") }
             } else {
                 if SCContext.lastPTS == nil { return }
                 if SCContext.awInput.isReadyForMoreMediaData { SCContext.awInput.append(SampleBuffer) }
@@ -617,7 +647,7 @@ extension AppDelegate {
             break
 #endif
         @unknown default:
-            assertionFailure("unknown stream type".local)
+            print("[Warning] Unknown stream type: \(outputType)")
         }
     }
 

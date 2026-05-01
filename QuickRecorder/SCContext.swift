@@ -184,9 +184,28 @@ class SCContext {
     }
     
     static func updateAudioSettings(format: String = ud.string(forKey: "audioFormat") ?? "", rate: Int = 48000) -> [String : Any] {
-        var audioSettings: [String : Any] = [AVSampleRateKey : rate, AVNumberOfChannelsKey : 2] // reset audioSettings
+        // AAC/Opus 编码器支持的采样率列表
+        let supportedSampleRates: [Int] = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000]
+        
+        // 将采样率限制到支持的范围内
+        var validRate = rate
+        if validRate > 48000 {
+            print("[Warning] Sample rate \(rate) Hz is too high, using 48000 Hz instead")
+            validRate = 48000
+        } else if !supportedSampleRates.contains(validRate) {
+            // 找到最接近的支持采样率
+            if let closest = supportedSampleRates.min(by: { abs($0 - validRate) < abs($1 - validRate) }) {
+                print("[Warning] Sample rate \(rate) Hz is not supported, using \(closest) Hz instead")
+                validRate = closest
+            } else {
+                validRate = 48000
+            }
+        }
+        
+        var audioSettings: [String : Any] = [AVSampleRateKey : validRate, AVNumberOfChannelsKey : 2] // reset audioSettings
         var bitRate = ud.integer(forKey: "audioQuality") * 1000
-        if rate < 44100 { bitRate = min(64000, bitRate / 2) }
+        if bitRate <= 0 { bitRate = 256000 } // 默认256kbps
+        if validRate < 44100 { bitRate = min(64000, bitRate / 2) }
         switch format {
         case AudioFormat.mp3.rawValue: fallthrough
         case AudioFormat.aac.rawValue:
@@ -201,7 +220,10 @@ class SCContext {
             audioSettings[AVFormatIDKey] = ud.string(forKey: "videoFormat") != VideoFormat.mp4.rawValue ? kAudioFormatOpus : kAudioFormatMPEG4AAC
             audioSettings[AVEncoderBitRateKey] =  bitRate
         default:
-            assertionFailure("unknown audio format while setting audio settings: ".local + (ud.string(forKey: "audioFormat") ?? "[no defaults]".local))
+            // 如果格式未知或为空，使用AAC作为默认格式
+            print("[Warning] Unknown audio format: '\(format)', using AAC as default")
+            audioSettings[AVFormatIDKey] = kAudioFormatMPEG4AAC
+            audioSettings[AVEncoderBitRateKey] = bitRate
         }
         return audioSettings
     }
@@ -720,11 +742,13 @@ class SCContext {
         let audioOnlyComposition = AVMutableComposition()
         
         let fileEnding = ud.string(forKey: "videoFormat") ?? ""
-        var fileType: AVFileType?
+        var fileType: AVFileType
         switch fileEnding {
         case VideoFormat.mov.rawValue: fileType = AVFileType.mov
         case VideoFormat.mp4.rawValue: fileType = AVFileType.mp4
-        default: assertionFailure("loaded unknown video format".local)
+        default:
+            print("[Warning] Unknown video format: '\(fileEnding)', using mp4 as default")
+            fileType = AVFileType.mp4
         }
         
         let audioTracks = asset.tracks(withMediaType: .audio)

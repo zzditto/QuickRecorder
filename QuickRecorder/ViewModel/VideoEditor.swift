@@ -56,11 +56,13 @@ class RecorderPlayerModel: NSObject, ObservableObject {
                             let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
                             let dateFormatter = DateFormatter()
                             let fileEnding = fileUrl.pathExtension.lowercased()
-                            var fileType: AVFileType?
+                            var fileType: AVFileType
                             switch fileEnding {
                                 case VideoFormat.mov.rawValue: fileType = AVFileType.mov
                                 case VideoFormat.mp4.rawValue: fileType = AVFileType.mp4
-                                default: assertionFailure("loaded unknown video format".local)
+                                default:
+                                    print("[Warning] Unknown video format: '\(fileEnding)', using mp4 as default")
+                                    fileType = AVFileType.mp4
                             }
                             dateFormatter.dateFormat = "y-MM-dd HH.mm.ss"
                             var path: String?
