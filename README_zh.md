@@ -1,3 +1,9 @@
+## 修复说明 (Fork 版本)
+此 fork 版本修复了以下问题:
+- **音频采样率兼容性问题**: 当采样率超过 AAC 编码器限制时 (如 96000 Hz), 自动限制到 48000 Hz
+- **音频设置崩溃问题**: 为空/无效的音频格式设置添加默认值处理
+- **增强错误处理**: 将强制解包替换为安全的错误处理, 避免崩溃
+
 # 
 <p align="center">
 <img src="./QuickRecorder/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png" width="200" height="200" />
@@ -32,12 +38,6 @@ brew install lihaoyun6/tap/quickrecorder
 - 完整支持 macOS 14 新增的 **[演讲者前置](https://support.apple.com/zh-cn/guide/facetime/fctm6333f4bd/mac)** 特性, 可在实时叠加摄像头画面 (低版本 macOS 可以使用悬浮窗模式).  
 - 支持 `HEVC with Alpha` 特性, 可在输出文件中包含 Alpha 通道 (目前仅 iMovie 与 FCPX 支持此特性)
 - 更多功能陆续开发中...  
-
-## 修复说明 (Fork 版本)
-此 fork 版本修复了以下问题:
-- **音频采样率兼容性问题**: 当采样率超过 AAC 编码器限制时 (如 96000 Hz), 自动限制到 48000 Hz
-- **音频设置崩溃问题**: 为空/无效的音频格式设置添加默认值处理
-- **增强错误处理**: 将强制解包替换为安全的错误处理, 避免崩溃
 
 ## 常见问题
 **1. 主面板关闭之后在哪里重新打开?**  
