@@ -169,7 +169,7 @@ class ScreenSelectorViewModel: NSObject, ObservableObject, SCStreamDelegate, SCS
     override init() {
         super.init()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.setupStreams()
+            self.setupStreams(request: ScreenCaptureSelectionSessionCoordinator.firstLoadRequest)
         }
     }
     
@@ -187,8 +187,8 @@ class ScreenSelectorViewModel: NSObject, ObservableObject, SCStreamDelegate, SCS
         }
     }
 
-    func setupStreams() {
-        SCContext.updateAvailableContent(request: .automatic) { status in
+    func setupStreams(request: ScreenCaptureContentRefreshRequest = .automatic) {
+        SCContext.updateAvailableContent(request: request) { status in
             guard status == .available else { return }
             Task {
                 do {

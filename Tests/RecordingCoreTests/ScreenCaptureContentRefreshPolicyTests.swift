@@ -38,6 +38,32 @@ final class ScreenCaptureContentRefreshPolicyTests: XCTestCase {
         )
     }
 
+    func testFirstSelectorLoadUsesUserInitiatedOrigin() {
+        XCTAssertEqual(
+            ScreenCaptureSelectionSessionCoordinator.firstLoadRequest.origin,
+            .userInitiated
+        )
+    }
+
+    func testStartingNewSelectionRejectsOldCompletion() {
+        let coordinator = ScreenCaptureSelectionSessionCoordinator()
+
+        let oldSession = coordinator.beginSession()
+        let currentSession = coordinator.beginSession()
+
+        XCTAssertFalse(coordinator.isCurrent(oldSession))
+        XCTAssertTrue(coordinator.isCurrent(currentSession))
+    }
+
+    func testInvalidatingSelectionRejectsItsCompletion() {
+        let coordinator = ScreenCaptureSelectionSessionCoordinator()
+        let session = coordinator.beginSession()
+
+        coordinator.invalidateCurrentSession()
+
+        XCTAssertFalse(coordinator.isCurrent(session))
+    }
+
     func testPermissionPromptGateRejectsConcurrentPromptUntilReleased() {
         let gate = ScreenCapturePermissionPromptGate()
 

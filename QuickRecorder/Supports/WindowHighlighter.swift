@@ -18,6 +18,7 @@ struct HighlightMask: View {
     let app: String
     let title: String
     let windowID: Int
+    let selectionSession: UInt64
     var appDelegate = AppDelegate.shared
     @State var window: SCWindow?
     @State var display: SCDisplay?
@@ -89,9 +90,7 @@ struct HighlightMask: View {
                 .frame(width: 640, height: 90)
                 .padding(.horizontal, 40)
                 .onDisappear {
-                    if let mask = WindowHighlighter.shared.mask {
-                        mask.close()
-                    }
+                    WindowHighlighter.shared.closeMask()
                 }
             }
             .onPressGesture {
@@ -100,6 +99,8 @@ struct HighlightMask: View {
 
                 WindowHighlighter.shared.getSCWindowWithID(UInt32(windowID)) { selectedWindow, status in
                     DispatchQueue.main.async {
+                        guard WindowHighlighter.shared.isCurrentSelectionSession(selectionSession) else { return }
+
                         guard status == .available,
                               let selectedWindow,
                               let selectedDisplay = SCContext.getSCDisplayWithMouse() else {
@@ -161,8 +162,34 @@ class WindowHighlighter {
     var targetWindowID: Int?
     var mask: EscPanel?
     var Mode: Int = 1
+    private let selectionSessions = ScreenCaptureSelectionSessionCoordinator()
+
+    @discardableResult
+    func beginSelectionSession() -> UInt64 {
+        selectionSessions.beginSession()
+    }
+
+    func invalidateCurrentSelectionSession() {
+        selectionSessions.invalidateCurrentSession()
+    }
+
+    func isCurrentSelectionSession(_ session: UInt64) -> Bool {
+        selectionSessions.isCurrent(session)
+    }
+
+    func closeMask() {
+        mask?.close()
+    }
+
+    func maskDidClose(_ closedMask: EscPanel) {
+        guard mask === closedMask else { return }
+
+        mask = nil
+        invalidateCurrentSelectionSession()
+    }
     
     func registerMouseMonitor(mode: Int = 1) {
+        beginSelectionSession()
         closeAllWindow()
         Mode = mode
         DispatchQueue.main.async {
@@ -193,7 +220,9 @@ class WindowHighlighter {
         }
         
         if mouseMonitor == nil {
-            mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { _ in self.updateMask() }
+            mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { _ in
+                DispatchQueue.main.async { self.updateMask() }
+            }
         }
         if mouseMonitorL == nil {
             mouseMonitorL = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { event in
@@ -219,14 +248,14 @@ class WindowHighlighter {
     
     func updateMask() {
         guard let targetWindow = getWindowUnderMouse() else {
-            mask?.close()
+            closeMask()
             targetWindowID = nil
             return
         }
         
         if let app = targetWindow["kCGWindowOwnerName"] as? String, app != Bundle.main.appName,
            let windowID = targetWindow["kCGWindowNumber"] as? Int, targetWindowID != windowID {
-            mask?.close()
+            closeMask()
             targetWindowID = windowID
             createMaskWindow(window: targetWindow)
         }
@@ -236,10 +265,18 @@ class WindowHighlighter {
         guard let windowID = targetWindowID, let frame = getCGWindowFrame(window: window) else { return }
         let app = window["kCGWindowOwnerName"] as? String ?? ""
         let title = window["kCGWindowName"] as? String ?? ""
+        let selectionSession = beginSelectionSession()
         
         mask = EscPanel(contentRect: CGRectTransform(cgRect: frame),
                         styleMask: [.nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
-        let contentView = NSHostingView(rootView: HighlightMask(app: app, title: title, windowID: windowID))
+        let contentView = NSHostingView(
+            rootView: HighlightMask(
+                app: app,
+                title: title,
+                windowID: windowID,
+                selectionSession: selectionSession
+            )
+        )
         mask?.contentView = contentView
         mask?.title = "Mask Window"
         mask?.hasShadow = false
@@ -320,7 +357,16 @@ class WindowHighlighter {
 }
 
 class EscPanel: NSPanel {
+    override func close() {
+        let isSelectionMask = WindowHighlighter.shared.mask === self
+        super.close()
+        if isSelectionMask {
+            WindowHighlighter.shared.maskDidClose(self)
+        }
+    }
+
     override func cancelOperation(_ sender: Any?) {
+        WindowHighlighter.shared.invalidateCurrentSelectionSession()
         self.close()
         WindowHighlighter.shared.stopMouseMonitor()
     }

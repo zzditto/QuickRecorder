@@ -42,6 +42,38 @@ public enum ScreenCaptureContentRefreshPolicy {
     }
 }
 
+public final class ScreenCaptureSelectionSessionCoordinator {
+    public static let firstLoadRequest = ScreenCaptureContentRefreshRequest.userInitiated
+
+    private let lock = NSLock()
+    private var currentSession: UInt64 = 0
+
+    public init() {}
+
+    @discardableResult
+    public func beginSession() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+
+        currentSession &+= 1
+        return currentSession
+    }
+
+    public func invalidateCurrentSession() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        currentSession &+= 1
+    }
+
+    public func isCurrent(_ session: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return session == currentSession
+    }
+}
+
 public final class ScreenCapturePermissionPromptGate {
     private let lock = NSLock()
     private var isPromptInFlight = false

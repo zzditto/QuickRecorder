@@ -174,11 +174,11 @@ class AppSelectorViewModel: ObservableObject {
     @Published var isReady = false
     
     init() {
-        updateAppList()
+        updateAppList(request: ScreenCaptureSelectionSessionCoordinator.firstLoadRequest)
     }
     
-    func updateAppList() {
-        SCContext.updateAvailableContent(request: .automatic) { status in
+    func updateAppList(request: ScreenCaptureContentRefreshRequest = .automatic) {
+        SCContext.updateAvailableContent(request: request) { status in
             guard status == .available else { return }
             guard let screens = SCContext.availableContent?.displays else { return }
             for screen in screens {
