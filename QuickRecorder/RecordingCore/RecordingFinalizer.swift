@@ -148,6 +148,23 @@ public enum RecordingFinalizerError: LocalizedError {
     }
 }
 
+enum RecordingRemuxTimeRange {
+    static func audioSourceTimeRange(
+        _ sourceTimeRange: CMTimeRange,
+        within outputTimeRange: CMTimeRange
+    ) -> CMTimeRange? {
+        guard sourceTimeRange.isValid, outputTimeRange.isValid else {
+            return nil
+        }
+
+        let intersection = CMTimeRangeGetIntersection(sourceTimeRange, otherRange: outputTimeRange)
+        guard intersection.isValid, CMTimeCompare(intersection.duration, .zero) > 0 else {
+            return nil
+        }
+        return intersection
+    }
+}
+
 protocol RecordingVideoRemuxing {
     func remux(
         sourceURL: URL,
@@ -189,14 +206,22 @@ private final class AVFoundationRecordingVideoRemuxer: RecordingVideoRemuxing {
 
         var audioMixParameters: [AVAudioMixInputParameters] = []
         for sourceAudioTrack in asset.tracks(withMediaType: .audio) {
-            guard let compositionAudioTrack = composition.addMutableTrack(
+            guard let audioTimeRange = RecordingRemuxTimeRange.audioSourceTimeRange(
+                sourceAudioTrack.timeRange,
+                within: timeRange
+            ), let compositionAudioTrack = composition.addMutableTrack(
                 withMediaType: .audio,
                 preferredTrackID: kCMPersistentTrackID_Invalid
             ) else {
                 continue
             }
             do {
-                try compositionAudioTrack.insertTimeRange(timeRange, of: sourceAudioTrack, at: .zero)
+                // Keep delayed audio aligned with its source timeline instead of shifting it to zero.
+                try compositionAudioTrack.insertTimeRange(
+                    audioTimeRange,
+                    of: sourceAudioTrack,
+                    at: audioTimeRange.start
+                )
             } catch {
                 completion(.failure(error))
                 return

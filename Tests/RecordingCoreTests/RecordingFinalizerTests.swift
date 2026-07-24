@@ -99,6 +99,52 @@ final class RecordingFinalizerTests: XCTestCase {
         XCTAssertEqual(range.duration.seconds, 42, accuracy: 0.001)
     }
 
+    func testAudioRemuxRangeUsesCompleteSourceRangeWhenItFitsOutput() {
+        let outputRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 5, preferredTimescale: 600))
+        let sourceRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 5, preferredTimescale: 600))
+
+        XCTAssertEqual(
+            RecordingRemuxTimeRange.audioSourceTimeRange(sourceRange, within: outputRange),
+            sourceRange
+        )
+    }
+
+    func testAudioRemuxRangeBoundsShortSourceRangeToItsAvailableDuration() {
+        let outputRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 5, preferredTimescale: 600))
+        let sourceRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 3, preferredTimescale: 600))
+
+        XCTAssertEqual(
+            RecordingRemuxTimeRange.audioSourceTimeRange(sourceRange, within: outputRange),
+            sourceRange
+        )
+    }
+
+    func testAudioRemuxRangePreservesDelayedSourceStart() {
+        let outputRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 5, preferredTimescale: 600))
+        let sourceRange = CMTimeRange(
+            start: CMTime(seconds: 2, preferredTimescale: 600),
+            duration: CMTime(seconds: 6, preferredTimescale: 600)
+        )
+
+        XCTAssertEqual(
+            RecordingRemuxTimeRange.audioSourceTimeRange(sourceRange, within: outputRange),
+            CMTimeRange(
+                start: CMTime(seconds: 2, preferredTimescale: 600),
+                duration: CMTime(seconds: 3, preferredTimescale: 600)
+            )
+        )
+    }
+
+    func testAudioRemuxRangeSkipsSourceWithoutPositiveDurationIntersection() {
+        let outputRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 5, preferredTimescale: 600))
+        let sourceRange = CMTimeRange(
+            start: CMTime(seconds: 5, preferredTimescale: 600),
+            duration: CMTime(seconds: 2, preferredTimescale: 600)
+        )
+
+        XCTAssertNil(RecordingRemuxTimeRange.audioSourceTimeRange(sourceRange, within: outputRange))
+    }
+
     func testVideoRemuxFinalizesWithRangeFromFinalDuration() {
         let remuxer = RecordingVideoRemuxerSpy(result: .success(()))
         let finalizer = RecordingFinalizer(fileManager: .default, remuxer: remuxer)
