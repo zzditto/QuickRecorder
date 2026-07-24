@@ -5,7 +5,7 @@
 ## QR-REC-001：录制时长被截断到最后一帧画面变化时间
 
 - 严重级别：高
-- 状态：根因已确认
+- 状态：已实现，等待最终人工验证
 - 现象：用户实际录制 6 分钟以上，但导出视频只有 1 分多钟；多次复现。
 - 触发条件：录制过程中后半段画面静止或 ScreenCaptureKit 没有继续交付新的屏幕帧，尤其是无系统音频或音频轨没有拉长容器时。
 - 根本原因：状态栏时长使用 `Date.now` 计算真实经过时间，但 `AVAssetWriter` 的视频时长由写入 sample buffer 的 PTS 决定。当前停止录制时直接 `markAsFinished()`/`finishWriting()`，没有补写一帧到真实停止时间，也没有调用 `endSession(atSourceTime:)` 将媒体会话结束到当前录制时间。ScreenCaptureKit 又只在屏幕内容变化时交付帧，因此最终文件时长会停在最后一帧到达的时间。
@@ -25,7 +25,7 @@
 ## QR-REC-002：`minimumFrameInterval` 在 60 FPS 及以上使用了无效/异常 CMTime
 
 - 严重级别：中
-- 状态：高可信问题
+- 状态：已实现，等待最终人工验证
 - 现象：60 FPS 及以上时帧节流配置异常，可能导致采集行为不稳定、性能压力变高，或和预期帧率不一致。
 - 根本原因：当前代码在 `frameRate >= 60` 时设置 `CMTime(value: 1, timescale: 0)`，并把它注释为“0 表示不节流”。但 `timescale` 为 0 的 `CMTime` 不是表达零时长的正常方式；不节流应使用 `.zero` 或符合 API 语义的零时长。
 - 代码证据：
@@ -39,7 +39,7 @@
 ## QR-REC-003：暂停/恢复只修正视频时间戳，没有同步修正系统音频和麦克风时间戳
 
 - 严重级别：高
-- 状态：高可信问题
+- 状态：已实现，等待最终人工验证
 - 现象：暂停恢复后，可能出现音频空洞、音画不同步、容器 duration 被音频拉长，或恢复后的音频时间轴和视频时间轴不一致。
 - 根本原因：恢复时 `timeOffset` 只用于 `.screen` sample buffer。系统音频 `.audio` 分支直接 append 原始 sample buffer；默认麦克风和外接麦克风也直接 append 自己的 sample buffer。暂停期间虽然回调被 return 掉，但恢复后的音频 PTS 没有减去暂停时长。
 - 代码证据：
@@ -56,7 +56,7 @@
 ## QR-REC-004：默认麦克风 sample buffer 使用转换时刻作为 PTS，可能产生漂移和抖动
 
 - 严重级别：中
-- 状态：高可信问题
+- 状态：已实现，等待最终人工验证
 - 现象：默认麦克风录制可能出现轻微漂移、延迟不稳定，长录制或高负载下更明显。
 - 根本原因：`AVAudioPCMBuffer.asSampleBuffer` 在转换时使用 `CMClockGetTime(CMClockGetHostTimeClock())` 作为 `presentationTimeStamp`，忽略了 `AVAudioEngine` tap 回调提供的 `AVAudioTime`。这个 PTS 是“处理/转换发生的时间”，不是音频 buffer 被采集的真实时间。
 - 代码证据：
@@ -71,7 +71,7 @@
 ## QR-REC-005：停止录制与 sample 回调并发访问 `AVAssetWriterInput`，存在竞态
 
 - 严重级别：中
-- 状态：高可信问题
+- 状态：已实现，等待最终人工验证
 - 现象：停止录制瞬间可能出现写入失败、丢尾帧、偶发崩溃或 `AVAssetWriter` 状态异常。
 - 根本原因：ScreenCaptureKit 输出回调运行在 `.global()` 队列，麦克风也有独立队列；停止录制在主线程/其他线程中调用 `stopCapture()`、`markAsFinished()`、`finishWriting()`。当前没有专用串行写入队列，也没有停止状态门闩来确保“停止后不再 append”。
 - 代码证据：
@@ -88,7 +88,7 @@
 ## QR-REC-006：系统音频 + 麦克风的纯音频录制完成流程没有等待麦克风 writer 完成
 
 - 严重级别：中
-- 状态：高可信问题
+- 状态：已实现，等待最终人工验证
 - 现象：纯音频录制且同时录系统音频和麦克风时，停止后立即进入后续导出/预览逻辑，可能读到尚未完成写入的麦克风文件。
 - 根本原因：`streamType == .systemaudio` 且 `recordMic == true` 时调用 `vW.finishWriting {}`，但没有等待 completion；后续代码继续执行 qma/remux/export 逻辑。
 - 代码证据：
@@ -101,7 +101,7 @@
 ## QR-REC-007：双音轨 remux 使用视频 asset duration 裁剪音频，可能继承被截断的视频时长
 
 - 严重级别：中
-- 状态：由 QR-REC-001 派生的高可信问题
+- 状态：已实现，等待最终人工验证
 - 现象：开启系统音频 + 麦克风并 remux 时，如果视频轨已因 QR-REC-001 被截短，后续混音也会按截短的视频 duration 裁掉音频。
 - 根本原因：`mixAudioTracks` 插入音频和视频时都使用 `asset.duration` 作为时间范围。如果原始视频容器 duration 已短于真实录制时间，则音频导出和最终 composition 都继承短 duration。
 - 代码证据：
