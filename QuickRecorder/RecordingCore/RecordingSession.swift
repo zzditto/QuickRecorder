@@ -26,7 +26,8 @@ public final class RecordingSession {
 
     private let configuration: RecordingSessionConfiguration
     private let finalizer: RecordingFinalizing
-    private let writer: RecordingWriter
+    private let writer: RecordingWriter?
+    private let writerCreationError: Error?
     private let sessionQueue = DispatchQueue(label: "QuickRecorder.RecordingSession")
     private var state: State = .idle
     private var timeline = RecordingTimeline()
@@ -40,8 +41,10 @@ public final class RecordingSession {
         self.finalizer = finalizer
         do {
             writer = try RecordingWriter(configuration: configuration.writerConfiguration)
+            writerCreationError = nil
         } catch {
-            preconditionFailure("Unable to create recording writer: \(error)")
+            writer = nil
+            writerCreationError = error
         }
     }
 
@@ -49,6 +52,7 @@ public final class RecordingSession {
         self.configuration = configuration
         self.finalizer = finalizer
         self.writer = writer
+        self.writerCreationError = nil
     }
 
     public var rejectedSampleCount: Int {
@@ -60,8 +64,17 @@ public final class RecordingSession {
             guard case .idle = state else {
                 throw RecordingSessionError.invalidStart
             }
-            try writer.start()
-            _ = timeline.presentationTime(for: .zero)
+            if let writerCreationError {
+                throw RecordingSessionError.writerCreationFailed(writerCreationError)
+            }
+            guard let writer else {
+                throw RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)
+            }
+            do {
+                try writer.start()
+            } catch {
+                throw RecordingSessionError.writerStartFailed(error)
+            }
             state = .recording
         }
     }
@@ -142,7 +155,15 @@ public final class RecordingSession {
             let finalDuration = self.timeline.finalDuration(at: sourceTime)
             let tailVideoSample = self.tailVideoSample(at: finalDuration)
 
-            self.writer.finish(finalDuration: finalDuration, tailVideoSample: tailVideoSample) { result in
+            guard let writer = self.writer else {
+                self.state = .stopped
+                self.complete(
+                    .failure(RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)),
+                    using: completion
+                )
+                return
+            }
+            writer.finish(finalDuration: finalDuration, tailVideoSample: tailVideoSample) { result in
                 self.sessionQueue.async {
                     guard case .success = result else {
                         self.state = .stopped
@@ -181,11 +202,11 @@ public final class RecordingSession {
         case .video:
             lastVideoSample = retimedSample
             lastVideoPresentationTime = presentationTime
-            writer.appendVideo(retimedSample)
+            writer?.appendVideo(retimedSample)
         case .systemAudio:
-            writer.appendSystemAudio(retimedSample)
+            writer?.appendSystemAudio(retimedSample)
         case .mic:
-            writer.appendMic(retimedSample)
+            writer?.appendMic(retimedSample)
         }
     }
 
@@ -195,7 +216,7 @@ public final class RecordingSession {
             rejectSample()
             return
         }
-        writer.appendMic(sampleBuffer)
+        writer?.appendMic(sampleBuffer)
     }
 
     private func tailVideoSample(at finalDuration: CMTime) -> CMSampleBuffer? {
@@ -226,7 +247,10 @@ private enum Media {
     case mic
 }
 
-private enum RecordingSessionError: Error {
+public enum RecordingSessionError: Error {
+    case writerCreationFailed(Error)
+    case writerStartFailed(Error)
     case invalidStart
     case invalidStop
+    case writerUnavailable
 }

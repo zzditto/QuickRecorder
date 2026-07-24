@@ -19,7 +19,7 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 50, preferredTimescale: 600)).seconds, 25, accuracy: 0.001)
     }
 
-    func testStopCallsFinalizerAfterWriterFinish() throws {
+    func testStopCallsFinalizerAfterWriterFinishWithoutSamples() throws {
         let finalizer = RecordingFinalizerSpy()
         let writer = RecordingWriter(adapter: RecordingWriterTestAdapter())
         let session = RecordingSession(configuration: .test(), finalizer: finalizer, writer: writer)
@@ -35,7 +35,39 @@ final class RecordingSessionTests: XCTestCase {
 
         wait(for: [completion], timeout: 1)
         XCTAssertEqual(finalizer.requests.count, 1)
-        XCTAssertEqual(finalizer.requests[0].finalDuration.seconds, 3, accuracy: 0.001)
+        XCTAssertEqual(finalizer.requests[0].finalDuration, .zero)
+    }
+
+    func testStopUsesFirstSampleAsTimelineStart() throws {
+        let finalizer = RecordingFinalizerSpy()
+        let writer = RecordingWriter(adapter: RecordingWriterTestAdapter())
+        let session = RecordingSession(configuration: .test(), finalizer: finalizer, writer: writer)
+        try session.start()
+        let completion = expectation(description: "stopped")
+
+        session.appendSystemAudio(try makeAudioSample(at: CMTime(seconds: 10, preferredTimescale: 48_000)))
+        session.stop(at: CMTime(seconds: 70, preferredTimescale: 600)) { result in
+            guard case .success = result else {
+                return XCTFail("Expected successful stop")
+            }
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+        XCTAssertEqual(finalizer.requests.count, 1)
+        XCTAssertEqual(finalizer.requests[0].finalDuration.seconds, 60, accuracy: 0.001)
+    }
+
+    func testStartWrapsWriterFailure() {
+        let finalizer = RecordingFinalizerSpy()
+        let writer = RecordingWriter(adapter: FailingStartRecordingWriterAdapter())
+        let session = RecordingSession(configuration: .test(), finalizer: finalizer, writer: writer)
+
+        XCTAssertThrowsError(try session.start()) { error in
+            guard case RecordingSessionError.writerStartFailed = error else {
+                return XCTFail("Expected writer start failure, got \(error)")
+            }
+        }
     }
 
     func testAppendAfterStopIsRejected() throws {
@@ -67,6 +99,28 @@ private final class RecordingFinalizerSpy: RecordingFinalizing {
         requests.append(request)
         completion(.success(RecordingOutput(url: request.outputURL, duration: request.finalDuration)))
     }
+}
+
+private final class FailingStartRecordingWriterAdapter: RecordingWriterAdapting {
+    var isReadyForVideo: Bool { false }
+    var isReadyForSystemAudio: Bool { false }
+    var isReadyForMic: Bool { false }
+
+    func startWriting() throws {
+        throw StartFailure()
+    }
+
+    func startSession(at time: CMTime) {}
+    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool { false }
+    func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) -> Bool { false }
+    func appendMic(_ sampleBuffer: CMSampleBuffer) -> Bool { false }
+    func endSession(at time: CMTime) {}
+    func markVideoFinished() {}
+    func markSystemAudioFinished() {}
+    func markMicFinished() {}
+    func finishWriting(completion: @escaping (Error?) -> Void) {}
+
+    private struct StartFailure: Error {}
 }
 
 private extension RecordingSessionConfiguration {
