@@ -70,6 +70,21 @@ final class RecordingSessionTests: XCTestCase {
         }
     }
 
+    func testStartWrapsWriterCreationFailure() {
+        let finalizer = RecordingFinalizerSpy()
+        let session = RecordingSession(
+            configuration: .test(),
+            finalizer: finalizer,
+            writerCreationError: WriterCreationFailure()
+        )
+
+        XCTAssertThrowsError(try session.start()) { error in
+            guard case RecordingSessionError.writerCreationFailed = error else {
+                return XCTFail("Expected writer creation failure, got \(error)")
+            }
+        }
+    }
+
     func testAppendAfterStopIsRejected() throws {
         let finalizer = RecordingFinalizerSpy()
         let writer = RecordingWriter(adapter: RecordingWriterTestAdapter())
@@ -122,6 +137,8 @@ private final class FailingStartRecordingWriterAdapter: RecordingWriterAdapting 
 
     private struct StartFailure: Error {}
 }
+
+private struct WriterCreationFailure: Error {}
 
 private extension RecordingSessionConfiguration {
     static func test() -> RecordingSessionConfiguration {

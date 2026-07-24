@@ -55,6 +55,13 @@ public final class RecordingSession {
         self.writerCreationError = nil
     }
 
+    init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing, writerCreationError: Error) {
+        self.configuration = configuration
+        self.finalizer = finalizer
+        self.writer = nil
+        self.writerCreationError = writerCreationError
+    }
+
     public var rejectedSampleCount: Int {
         sessionQueue.sync { rejectedSamples }
     }
