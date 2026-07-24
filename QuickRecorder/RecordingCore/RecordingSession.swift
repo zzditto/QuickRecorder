@@ -3,15 +3,19 @@ import CoreMedia
 import Foundation
 
 public struct RecordingSessionConfiguration {
-    public let writerConfiguration: RecordingWriterConfiguration
-    public let finalizerMode: RecordingFinalizerMode
+    public let writers: RecordingSessionWriters
+    public let output: RecordingSessionOutput
 
     public init(
-        writerConfiguration: RecordingWriterConfiguration,
-        finalizerMode: RecordingFinalizerMode
+        writers: RecordingSessionWriters,
+        output: RecordingSessionOutput
     ) {
-        self.writerConfiguration = writerConfiguration
-        self.finalizerMode = finalizerMode
+        precondition(
+            writers.configurations.map(\.outputURL) == output.writerOutputURLs,
+            "Writer destinations must match the recording output."
+        )
+        self.writers = writers
+        self.output = output
     }
 }
 
@@ -26,7 +30,7 @@ public final class RecordingSession {
 
     private let configuration: RecordingSessionConfiguration
     private let finalizer: RecordingFinalizing
-    private let writer: RecordingWriter?
+    private let writers: [RecordingWriter]
     private let writerCreationError: Error?
     private let sourceClock: RecordingSourceClock
     private let sessionQueue = DispatchQueue(label: "QuickRecorder.RecordingSession")
@@ -47,23 +51,43 @@ public final class RecordingSession {
         self.finalizer = finalizer
         self.sourceClock = HostTimeRecordingSourceClock()
         do {
-            writer = try RecordingWriter(configuration: configuration.writerConfiguration)
+            if case let .qmaPackage(package) = configuration.output {
+                try FileManager.default.createDirectory(
+                    at: package.packageURL,
+                    withIntermediateDirectories: true
+                )
+            }
+            writers = try configuration.writers.configurations.map(RecordingWriter.init(configuration:))
             writerCreationError = nil
         } catch {
-            writer = nil
+            writers = []
             writerCreationError = error
         }
     }
 
-    init(
+    convenience init(
         configuration: RecordingSessionConfiguration,
         finalizer: RecordingFinalizing,
         writer: RecordingWriter,
         sourceClock: RecordingSourceClock = HostTimeRecordingSourceClock()
     ) {
+        self.init(
+            configuration: configuration,
+            finalizer: finalizer,
+            writers: [writer],
+            sourceClock: sourceClock
+        )
+    }
+
+    init(
+        configuration: RecordingSessionConfiguration,
+        finalizer: RecordingFinalizing,
+        writers: [RecordingWriter],
+        sourceClock: RecordingSourceClock = HostTimeRecordingSourceClock()
+    ) {
         self.configuration = configuration
         self.finalizer = finalizer
-        self.writer = writer
+        self.writers = writers
         self.writerCreationError = nil
         self.sourceClock = sourceClock
     }
@@ -76,7 +100,7 @@ public final class RecordingSession {
     ) {
         self.configuration = configuration
         self.finalizer = finalizer
-        self.writer = nil
+        self.writers = []
         self.writerCreationError = writerCreationError
         self.sourceClock = sourceClock
     }
@@ -99,11 +123,11 @@ public final class RecordingSession {
             if let writerCreationError {
                 throw RecordingSessionError.writerCreationFailed(writerCreationError)
             }
-            guard let writer else {
+            guard !writers.isEmpty else {
                 throw RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)
             }
             do {
-                try writer.start()
+                try writers.forEach { try $0.start() }
             } catch {
                 throw RecordingSessionError.writerStartFailed(error)
             }
@@ -250,7 +274,7 @@ public final class RecordingSession {
         let finalDuration = timeline.finalDuration(at: sourceTime)
         let tailVideoSample = tailVideoSample(at: finalDuration)
 
-        guard let writer else {
+        guard !writers.isEmpty else {
             state = .stopped
             complete(
                 .failure(RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)),
@@ -258,25 +282,31 @@ public final class RecordingSession {
             )
             return
         }
-        writer.finish(finalDuration: finalDuration, tailVideoSample: tailVideoSample) { result in
-            self.sessionQueue.async {
-                guard case .success = result else {
-                    self.state = .stopped
-                    if case let .failure(error) = result {
-                        self.complete(.failure(error), using: completion)
+        let writerCompletionGroup = DispatchGroup()
+        var writerError: Error?
+        for writer in writers {
+            writerCompletionGroup.enter()
+            writer.finish(finalDuration: finalDuration, tailVideoSample: tailVideoSample) { result in
+                self.sessionQueue.async {
+                    if case let .failure(error) = result, writerError == nil {
+                        writerError = error
                     }
-                    return
+                    writerCompletionGroup.leave()
                 }
-                self.state = .stopped
-                let request = RecordingFinalizerRequest(
-                    sourceURL: self.configuration.writerConfiguration.outputURL,
-                    outputURL: self.configuration.writerConfiguration.outputURL,
-                    finalDuration: finalDuration,
-                    mode: self.configuration.finalizerMode
-                )
-                self.finalizer.finalize(request) { result in
-                    self.complete(result, using: completion)
-                }
+            }
+        }
+        writerCompletionGroup.notify(queue: sessionQueue) {
+            self.state = .stopped
+            if let writerError {
+                self.complete(.failure(writerError), using: completion)
+                return
+            }
+            let request = RecordingFinalizerRequest(
+                output: self.configuration.output,
+                finalDuration: finalDuration
+            )
+            self.finalizer.finalize(request) { result in
+                self.complete(result, using: completion)
             }
         }
     }
@@ -292,11 +322,11 @@ public final class RecordingSession {
         case .video:
             lastVideoSample = retimedSample
             lastVideoPresentationTime = presentationTime
-            writer?.appendVideo(retimedSample)
+            writers.forEach { $0.appendVideo(retimedSample) }
         case .systemAudio:
-            writer?.appendSystemAudio(retimedSample)
+            writers.forEach { $0.appendSystemAudio(retimedSample) }
         case .mic:
-            writer?.appendMic(retimedSample)
+            writers.forEach { $0.appendMic(retimedSample) }
         }
     }
 
@@ -306,7 +336,7 @@ public final class RecordingSession {
             rejectSample()
             return
         }
-        writer?.appendMic(sampleBuffer)
+        writers.forEach { $0.appendMic(sampleBuffer) }
     }
 
     private func tailVideoSample(at finalDuration: CMTime) -> CMSampleBuffer? {

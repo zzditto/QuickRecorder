@@ -4,6 +4,18 @@ import XCTest
 @testable import RecordingCore
 
 final class RecordingWriterStateTests: XCTestCase {
+    func testConfigurationDescribesEnabledMediaInputs() {
+        let configuration = RecordingWriterConfiguration(
+            outputURL: URL(fileURLWithPath: "/tmp/recording.m4a"),
+            fileType: .m4a,
+            systemAudioOutputSettings: [:]
+        )
+
+        XCTAssertFalse(configuration.writesVideo)
+        XCTAssertTrue(configuration.writesSystemAudio)
+        XCTAssertFalse(configuration.writesMicrophoneAudio)
+    }
+
     func testStateMachineAcceptsSamplesOnlyAfterStarting() {
         var state = RecordingWriterStateMachine()
         XCTAssertFalse(state.acceptsSamples)

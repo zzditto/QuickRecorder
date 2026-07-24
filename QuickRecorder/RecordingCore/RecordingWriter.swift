@@ -9,6 +9,10 @@ public struct RecordingWriterConfiguration {
     public let systemAudioOutputSettings: [String: Any]?
     public let micOutputSettings: [String: Any]?
 
+    public var writesVideo: Bool { videoOutputSettings != nil }
+    public var writesSystemAudio: Bool { systemAudioOutputSettings != nil }
+    public var writesMicrophoneAudio: Bool { micOutputSettings != nil }
+
     public init(
         outputURL: URL,
         fileType: AVFileType,

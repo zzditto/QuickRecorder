@@ -38,6 +38,72 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(finalizer.requests[0].finalDuration, .zero)
     }
 
+    func testQMAFinalizerWaitsForBothAudioWritersToFinish() throws {
+        let packageURL = URL(fileURLWithPath: "/tmp/session.qma")
+        let systemAudioURL = packageURL.appendingPathComponent("sys.m4a")
+        let microphoneAudioURL = packageURL.appendingPathComponent("mic.m4a")
+        let configuration = RecordingSessionConfiguration(
+            writers: .qma(
+                systemAudio: RecordingWriterConfiguration(
+                    outputURL: systemAudioURL,
+                    fileType: .m4a,
+                    systemAudioOutputSettings: [:]
+                ),
+                microphoneAudio: RecordingWriterConfiguration(
+                    outputURL: microphoneAudioURL,
+                    fileType: .m4a,
+                    micOutputSettings: [:]
+                )
+            ),
+            output: .qmaPackage(
+                RecordingQMAPackageOutput(
+                    packageURL: packageURL,
+                    systemAudioURL: systemAudioURL,
+                    microphoneAudioURL: microphoneAudioURL,
+                    info: RecordingQMAPackageInfo(
+                        format: "m4a",
+                        encoder: "aac",
+                        exportMP3: false,
+                        sysVol: 1,
+                        micVol: 1
+                    )
+                )
+            )
+        )
+        let systemAdapter = HoldingFinishRecordingWriterAdapter()
+        let microphoneAdapter = HoldingFinishRecordingWriterAdapter()
+        let systemFinishRequested = expectation(description: "system writer finish requested")
+        let microphoneFinishRequested = expectation(description: "microphone writer finish requested")
+        systemAdapter.onFinishRequested = { systemFinishRequested.fulfill() }
+        microphoneAdapter.onFinishRequested = { microphoneFinishRequested.fulfill() }
+        let finalizer = RecordingFinalizerSpy()
+        let finalizing = expectation(description: "finalizer invoked")
+        finalizer.onFinalize = { finalizing.fulfill() }
+        let session = RecordingSession(
+            configuration: configuration,
+            finalizer: finalizer,
+            writers: [
+                RecordingWriter(adapter: systemAdapter),
+                RecordingWriter(adapter: microphoneAdapter)
+            ]
+        )
+        try session.start()
+
+        session.stop(at: CMTime(seconds: 3, preferredTimescale: 600)) { _ in }
+        wait(for: [systemFinishRequested, microphoneFinishRequested], timeout: 1)
+        XCTAssertTrue(finalizer.requests.isEmpty)
+
+        systemAdapter.complete()
+        XCTAssertTrue(finalizer.requests.isEmpty)
+        microphoneAdapter.complete()
+
+        wait(for: [finalizing], timeout: 1)
+        XCTAssertEqual(finalizer.requests.count, 1)
+        guard case .qmaPackage = finalizer.requests[0].output else {
+            return XCTFail("Expected QMA finalizer request")
+        }
+    }
+
     func testStopUsesFirstSampleAsTimelineStart() throws {
         let finalizer = RecordingFinalizerSpy()
         let writer = RecordingWriter(adapter: RecordingWriterTestAdapter())
@@ -448,10 +514,12 @@ private final class CapturingRecordingWriterAdapter: RecordingWriterAdapting {
 
 private final class RecordingFinalizerSpy: RecordingFinalizing {
     private(set) var requests: [RecordingFinalizerRequest] = []
+    var onFinalize: (() -> Void)?
 
     func finalize(_ request: RecordingFinalizerRequest, completion: @escaping (Result<RecordingOutput, Error>) -> Void) {
         requests.append(request)
-        completion(.success(RecordingOutput(url: request.outputURL, duration: request.finalDuration)))
+        onFinalize?()
+        completion(.success(RecordingOutput(url: request.output.finalURL, duration: request.finalDuration)))
     }
 }
 
@@ -469,7 +537,7 @@ private final class HoldingRecordingFinalizer: RecordingFinalizing {
     func completeSuccessfully() {
         guard let request, let completion else { return }
         self.completion = nil
-        completion(.success(RecordingOutput(url: request.outputURL, duration: request.finalDuration)))
+        completion(.success(RecordingOutput(url: request.output.finalURL, duration: request.finalDuration)))
     }
 }
 
@@ -495,19 +563,50 @@ private final class FailingStartRecordingWriterAdapter: RecordingWriterAdapting 
     private struct StartFailure: Error {}
 }
 
+private final class HoldingFinishRecordingWriterAdapter: RecordingWriterAdapting {
+    var isReadyForVideo: Bool { true }
+    var isReadyForSystemAudio: Bool { true }
+    var isReadyForMic: Bool { true }
+    var onFinishRequested: (() -> Void)?
+    private var completion: ((Error?) -> Void)?
+
+    func startWriting() throws {}
+    func startSession(at time: CMTime) {}
+    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
+    func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
+    func appendMic(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
+    func endSession(at time: CMTime) {}
+    func markVideoFinished() {}
+    func markSystemAudioFinished() {}
+    func markMicFinished() {}
+
+    func finishWriting(completion: @escaping (Error?) -> Void) {
+        self.completion = completion
+        onFinishRequested?()
+    }
+
+    func complete() {
+        let completion = completion
+        self.completion = nil
+        completion?(nil)
+    }
+}
+
 private struct WriterCreationFailure: Error {}
 
 private extension RecordingSessionConfiguration {
     static func test() -> RecordingSessionConfiguration {
         RecordingSessionConfiguration(
-            writerConfiguration: RecordingWriterConfiguration(
-                outputURL: URL(fileURLWithPath: "/tmp/session.mov"),
-                fileType: .mov,
-                videoOutputSettings: nil,
-                systemAudioOutputSettings: nil,
-                micOutputSettings: nil
+            writers: .single(
+                RecordingWriterConfiguration(
+                    outputURL: URL(fileURLWithPath: "/tmp/session.mov"),
+                    fileType: .mov,
+                    videoOutputSettings: nil,
+                    systemAudioOutputSettings: nil,
+                    micOutputSettings: nil
+                )
             ),
-            finalizerMode: .videoWithoutRemux
+            output: .videoDirect(outputURL: URL(fileURLWithPath: "/tmp/session.mov"))
         )
     }
 }
