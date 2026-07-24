@@ -1,0 +1,864 @@
+# 录制稳定性系统修复实现计划
+
+> **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
+
+**目标：** 用单一录制内核完整接管 QuickRecorder 的媒体时间轴、writer 写入、停止、remux 和纯音频后处理，修复 QR-REC-001 至 QR-REC-007，且不保留旧 writer 直写路径。
+
+**架构：** `SCContext` 和 `RecordEngine` 只负责 UI/采集入口转发；`RecordingSession` 拥有串行 session queue 和 timeline；`RecordingWriter` 完整拥有 `AVAssetWriter` 生命周期；`RecordingFinalizer` 完整拥有后处理。所有视频、系统音频、默认麦克风、AEC 麦克风、外接麦克风都进入同一 session。
+
+**技术栈：** Swift 5、Foundation、CoreMedia、AVFoundation、ScreenCaptureKit、SwiftPM/XCTest、Xcode macOS app build。
+
+---
+
+## 文件结构
+
+- 创建：`Package.swift`
+- 创建：`QuickRecorder/RecordingCore/RecordingTimeline.swift`
+- 创建：`QuickRecorder/RecordingCore/SampleRetiming.swift`
+- 创建：`QuickRecorder/RecordingCore/AudioSampleBufferFactory.swift`
+- 创建：`QuickRecorder/RecordingCore/AECAudioClock.swift`
+- 创建：`QuickRecorder/RecordingCore/RecordingWriter.swift`
+- 创建：`QuickRecorder/RecordingCore/RecordingSession.swift`
+- 创建：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingTimelineTests.swift`
+- 创建：`Tests/RecordingCoreTests/SampleRetimingTests.swift`
+- 创建：`Tests/RecordingCoreTests/AudioSampleBufferFactoryTests.swift`
+- 创建：`Tests/RecordingCoreTests/AECAudioClockTests.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingWriterStateTests.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
+- 修改：`QuickRecorder.xcodeproj/project.pbxproj`
+- 修改：`QuickRecorder/SCContext.swift`
+- 修改：`QuickRecorder/RecordEngine.swift`
+- 修改：`QuickRecorder/ViewModel/StatusBar.swift`
+- 修改：`docs/recording-issues.md`
+
+## 全局执行约束
+
+- 不允许新增或保留 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume`。
+- 不允许在 `RecordingWriter` 以外调用 `AVAssetWriterInput.append`。
+- 不允许在录制停止路径使用 `DispatchGroup.wait()`。
+- 不允许使用 `CMTime(value: 1, timescale: 0)`。
+- 不允许使用 `asSampleBuffer!`。
+- 每个任务完成后必须运行该任务指定验证命令。
+
+## 任务 1：建立 RecordingCore 测试入口
+
+**文件：**
+- 创建：`Package.swift`
+- 创建：`QuickRecorder/RecordingCore/RecordingTimeline.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingTimelineTests.swift`
+
+- [ ] **步骤 1：创建 SwiftPM package**
+
+```swift
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "QuickRecorderRecordingCore",
+    platforms: [.macOS(.v12)],
+    products: [
+        .library(name: "RecordingCore", targets: ["RecordingCore"])
+    ],
+    targets: [
+        .target(name: "RecordingCore", path: "QuickRecorder/RecordingCore"),
+        .testTarget(name: "RecordingCoreTests", dependencies: ["RecordingCore"], path: "Tests/RecordingCoreTests")
+    ]
+)
+```
+
+- [ ] **步骤 2：创建最小核心文件**
+
+```swift
+import CoreMedia
+import Foundation
+
+public struct RecordingTimeline {
+    public init() {}
+}
+```
+
+- [ ] **步骤 3：创建编译测试**
+
+```swift
+import XCTest
+@testable import RecordingCore
+
+final class RecordingTimelineTests: XCTestCase {
+    func testPackageCompiles() {
+        _ = RecordingTimeline()
+    }
+}
+```
+
+- [ ] **步骤 4：验证**
+
+运行：`rtk swift test`
+
+预期：PASS。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add Package.swift QuickRecorder/RecordingCore/RecordingTimeline.swift Tests/RecordingCoreTests/RecordingTimelineTests.swift
+git commit -m "test: add recording core harness"
+```
+
+## 任务 2：实现完整 RecordingTimeline
+
+**文件：**
+- 修改：`QuickRecorder/RecordingCore/RecordingTimeline.swift`
+- 修改：`Tests/RecordingCoreTests/RecordingTimelineTests.swift`
+
+- [ ] **步骤 1：写失败测试**
+
+```swift
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class RecordingTimelineTests: XCTestCase {
+    func testAnyFirstSampleStartsTimelineAtZero() {
+        var timeline = RecordingTimeline()
+        let mapped = timeline.presentationTime(for: CMTime(seconds: 20, preferredTimescale: 600))
+        XCTAssertEqual(mapped, .zero)
+        XCTAssertEqual(timeline.sourceStartTime?.seconds, 20, accuracy: 0.001)
+    }
+
+    func testPauseDurationIsRemovedFromAllTracks() {
+        var timeline = RecordingTimeline()
+        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
+        timeline.pause(at: CMTime(seconds: 13, preferredTimescale: 600))
+        timeline.resume(at: CMTime(seconds: 18, preferredTimescale: 600))
+        let video = timeline.presentationTime(for: CMTime(seconds: 20, preferredTimescale: 600))
+        let audio = timeline.presentationTime(for: CMTime(seconds: 21, preferredTimescale: 600))
+        XCTAssertEqual(video.seconds, 5, accuracy: 0.001)
+        XCTAssertEqual(audio.seconds, 6, accuracy: 0.001)
+    }
+
+    func testFinalDurationUsesStopSourceTime() {
+        var timeline = RecordingTimeline()
+        _ = timeline.presentationTime(for: CMTime(seconds: 100, preferredTimescale: 600))
+        _ = timeline.presentationTime(for: CMTime(seconds: 120, preferredTimescale: 600))
+        let final = timeline.finalDuration(at: CMTime(seconds: 180, preferredTimescale: 600))
+        XCTAssertEqual(final.seconds, 80, accuracy: 0.001)
+    }
+
+    func testPresentationTimeIsMonotonic() {
+        var timeline = RecordingTimeline()
+        let first = timeline.presentationTime(for: CMTime(seconds: 5, preferredTimescale: 600))
+        let second = timeline.presentationTime(for: CMTime(seconds: 4, preferredTimescale: 600))
+        XCTAssertEqual(first, .zero)
+        XCTAssertEqual(second, .zero)
+    }
+}
+```
+
+- [ ] **步骤 2：验证失败**
+
+运行：`rtk swift test --filter RecordingTimelineTests`
+
+预期：FAIL，缺少 `presentationTime`。
+
+- [ ] **步骤 3：实现 timeline**
+
+```swift
+import CoreMedia
+import Foundation
+
+public struct RecordingTimeline {
+    public private(set) var sourceStartTime: CMTime?
+    public private(set) var accumulatedPauseDuration: CMTime = .zero
+    public private(set) var lastPresentationTime: CMTime = .zero
+    private var pauseStartSourceTime: CMTime?
+
+    public init() {}
+
+    public var isPaused: Bool { pauseStartSourceTime != nil }
+
+    public mutating func presentationTime(for sourceTime: CMTime) -> CMTime {
+        if sourceStartTime == nil {
+            sourceStartTime = sourceTime
+        }
+        guard let start = sourceStartTime else { return .zero }
+        let relative = CMTimeSubtract(sourceTime, start)
+        let mapped = CMTimeMaximum(.zero, CMTimeSubtract(relative, accumulatedPauseDuration))
+        lastPresentationTime = CMTimeMaximum(lastPresentationTime, mapped)
+        return lastPresentationTime
+    }
+
+    public mutating func pause(at sourceTime: CMTime) {
+        guard pauseStartSourceTime == nil else { return }
+        pauseStartSourceTime = sourceTime
+    }
+
+    public mutating func resume(at sourceTime: CMTime) {
+        guard let pauseStart = pauseStartSourceTime else { return }
+        accumulatedPauseDuration = CMTimeAdd(
+            accumulatedPauseDuration,
+            CMTimeMaximum(.zero, CMTimeSubtract(sourceTime, pauseStart))
+        )
+        pauseStartSourceTime = nil
+    }
+
+    public mutating func finalDuration(at sourceTime: CMTime) -> CMTime {
+        presentationTime(for: sourceTime)
+    }
+}
+```
+
+- [ ] **步骤 4：验证通过**
+
+运行：`rtk swift test --filter RecordingTimelineTests`
+
+预期：PASS。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingTimeline.swift Tests/RecordingCoreTests/RecordingTimelineTests.swift
+git commit -m "feat: add recording timeline"
+```
+
+## 任务 3：实现 SampleRetiming、AudioSampleBufferFactory、AECAudioClock
+
+**文件：**
+- 创建：`QuickRecorder/RecordingCore/SampleRetiming.swift`
+- 创建：`QuickRecorder/RecordingCore/AudioSampleBufferFactory.swift`
+- 创建：`QuickRecorder/RecordingCore/AECAudioClock.swift`
+- 创建：`Tests/RecordingCoreTests/SampleRetimingTests.swift`
+- 创建：`Tests/RecordingCoreTests/AudioSampleBufferFactoryTests.swift`
+- 创建：`Tests/RecordingCoreTests/AECAudioClockTests.swift`
+
+- [ ] **步骤 1：写测试**
+
+`AudioSampleBufferFactoryTests.swift`：
+
+```swift
+import AVFoundation
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class AudioSampleBufferFactoryTests: XCTestCase {
+    func testPCMBufferUsesProvidedPresentationTime() throws {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480)!
+        buffer.frameLength = 480
+        let pts = CMTime(seconds: 3, preferredTimescale: 48_000)
+        let sample = try XCTUnwrap(AudioSampleBufferFactory.makeSampleBuffer(from: buffer, presentationTime: pts))
+        XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(sample), pts)
+        XCTAssertEqual(CMSampleBufferGetNumSamples(sample), 480)
+    }
+}
+```
+
+`AECAudioClockTests.swift`：
+
+```swift
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class AECAudioClockTests: XCTestCase {
+    func testClockAdvancesByFrameLengthOverSampleRate() {
+        var clock = AECAudioClock(sampleRate: 48_000, startTime: .zero)
+        let first = clock.nextSourceTime(frameLength: 480)
+        let second = clock.nextSourceTime(frameLength: 480)
+        XCTAssertEqual(first.seconds, 0, accuracy: 0.001)
+        XCTAssertEqual(second.seconds, 0.01, accuracy: 0.001)
+    }
+}
+```
+
+`SampleRetimingTests.swift`：
+
+```swift
+import AVFoundation
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class SampleRetimingTests: XCTestCase {
+    func testInvalidSampleReturnsNil() {
+        XCTAssertNil(RecordingSampleRetimer.copy(nil, presentationTime: .zero))
+    }
+
+    func testAudioSamplePTSIsRetimed() throws {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480)!
+        buffer.frameLength = 480
+        let original = try XCTUnwrap(AudioSampleBufferFactory.makeSampleBuffer(from: buffer, presentationTime: .zero))
+        let retimed = try XCTUnwrap(RecordingSampleRetimer.copy(original, presentationTime: CMTime(seconds: 7, preferredTimescale: 48_000)))
+        XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(retimed).seconds, 7, accuracy: 0.001)
+    }
+}
+```
+
+- [ ] **步骤 2：验证失败**
+
+运行：`rtk swift test --filter AudioSampleBufferFactoryTests && rtk swift test --filter AECAudioClockTests && rtk swift test --filter SampleRetimingTests`
+
+预期：FAIL，缺少类型。
+
+- [ ] **步骤 3：实现三个工具**
+
+`AECAudioClock.swift`：
+
+```swift
+import CoreMedia
+import Foundation
+
+public struct AECAudioClock {
+    private let sampleRate: Double
+    private var nextTime: CMTime
+
+    public init(sampleRate: Double, startTime: CMTime) {
+        self.sampleRate = sampleRate
+        self.nextTime = startTime
+    }
+
+    public mutating func nextSourceTime(frameLength: AVAudioFrameCount) -> CMTime {
+        let current = nextTime
+        let step = CMTime(seconds: Double(frameLength) / sampleRate, preferredTimescale: 1_000_000_000)
+        nextTime = CMTimeAdd(nextTime, step)
+        return current
+    }
+}
+```
+
+`SampleRetiming.swift` and `AudioSampleBufferFactory.swift` must implement the tested APIs exactly:
+
+```swift
+public enum RecordingSampleRetimer {
+    public static func copy(_ sampleBuffer: CMSampleBuffer?, presentationTime: CMTime) -> CMSampleBuffer?
+}
+
+public enum AudioSampleBufferFactory {
+    public static func makeSampleBuffer(from buffer: AVAudioPCMBuffer, presentationTime: CMTime) -> CMSampleBuffer?
+}
+```
+
+Implementation requirements:
+
+- Preserve format description.
+- Preserve sample count.
+- Return nil on CoreMedia errors.
+- Never force unwrap.
+
+- [ ] **步骤 4：验证通过**
+
+运行：`rtk swift test`
+
+预期：PASS。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore Tests/RecordingCoreTests
+git commit -m "feat: add recording sample timing utilities"
+```
+
+## 任务 4：实现完整 RecordingWriter
+
+**文件：**
+- 创建：`QuickRecorder/RecordingCore/RecordingWriter.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingWriterStateTests.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingWriterOrderTests.swift`
+
+- [ ] **步骤 1：写状态机测试**
+
+```swift
+import XCTest
+@testable import RecordingCore
+
+final class RecordingWriterStateTests: XCTestCase {
+    func testStateMachineRejectsSamplesAfterStopping() {
+        var state = RecordingWriterStateMachine()
+        XCTAssertTrue(state.acceptsSamples)
+        state.beginStopping()
+        XCTAssertFalse(state.acceptsSamples)
+        state.finish()
+        XCTAssertFalse(state.acceptsSamples)
+    }
+}
+```
+
+- [ ] **步骤 2：写 finish 顺序测试**
+
+`RecordingWriterOrderTests.swift` must use a test adapter instead of real files:
+
+```swift
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class RecordingWriterOrderTests: XCTestCase {
+    func testFinishOrderIsTailThenEndThenMarkThenFinish() {
+        let adapter = RecordingWriterTestAdapter()
+        let writer = RecordingWriter(adapter: adapter)
+
+        writer.finish(finalDuration: CMTime(seconds: 12, preferredTimescale: 600), tailVideoSample: nil) { _ in }
+        adapter.drainQueue()
+
+        XCTAssertEqual(adapter.events, [
+            "endSession:12.0",
+            "markVideoFinished",
+            "markSystemAudioFinished",
+            "markMicFinished",
+            "finishWriting"
+        ])
+    }
+}
+```
+
+This requires `RecordingWriter` to depend on an internal adapter protocol. Production uses `AVAssetWriterAdapter`; tests use `RecordingWriterTestAdapter`.
+
+- [ ] **步骤 3：验证失败**
+
+运行：`rtk swift test --filter RecordingWriterStateTests`
+
+运行：`rtk swift test --filter RecordingWriterOrderTests`
+
+预期：FAIL，缺少 `RecordingWriterStateMachine`、`RecordingWriterTestAdapter` 或 adapter initializer。
+
+- [ ] **步骤 4：实现 writer**
+
+`RecordingWriter` must:
+
+- Build `AVAssetWriter` and all inputs from a configuration object via `AVAssetWriterAdapter`.
+- Expose an internal `init(adapter:)` for tests.
+- Call `startWriting()` inside `start()`.
+- Start session exactly once at `.zero` before first append.
+- Append all media on its private writer queue.
+- Track dropped video/system audio/mic counts.
+- Finish with `tailVideoSample -> endSession -> markFinished -> finishWriting`.
+- Return completion asynchronously.
+- Never expose raw writer/input.
+
+Required public shape:
+
+```swift
+public final class RecordingWriter {
+    public init(configuration: RecordingWriterConfiguration) throws
+    init(adapter: RecordingWriterAdapting)
+    public func start() throws
+    public func appendVideo(_ sampleBuffer: CMSampleBuffer)
+    public func appendSystemAudio(_ sampleBuffer: CMSampleBuffer)
+    public func appendMic(_ sampleBuffer: CMSampleBuffer)
+    public func finish(finalDuration: CMTime, tailVideoSample: CMSampleBuffer?, completion: @escaping (Result<RecordingWriterSummary, Error>) -> Void)
+}
+```
+
+Required internal adapter shape:
+
+```swift
+protocol RecordingWriterAdapting: AnyObject {
+    var isReadyForVideo: Bool { get }
+    var isReadyForSystemAudio: Bool { get }
+    var isReadyForMic: Bool { get }
+    func startWriting() throws
+    func startSession(at time: CMTime)
+    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool
+    func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) -> Bool
+    func appendMic(_ sampleBuffer: CMSampleBuffer) -> Bool
+    func endSession(at time: CMTime)
+    func markVideoFinished()
+    func markSystemAudioFinished()
+    func markMicFinished()
+    func finishWriting(completion: @escaping (Error?) -> Void)
+}
+```
+
+- [ ] **步骤 5：验证**
+
+运行：`rtk swift test`
+
+预期：PASS。
+
+- [ ] **步骤 6：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingWriter.swift Tests/RecordingCoreTests/RecordingWriterStateTests.swift Tests/RecordingCoreTests/RecordingWriterOrderTests.swift
+git commit -m "feat: add recording writer"
+```
+
+## 任务 5：实现完整 RecordingSession
+
+**文件：**
+- 创建：`QuickRecorder/RecordingCore/RecordingSession.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
+
+- [ ] **步骤 1：写 session 行为测试**
+
+```swift
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class RecordingSessionTests: XCTestCase {
+    func testStopDurationIncludesTimeAfterLastFrame() {
+        var timeline = RecordingTimeline()
+        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
+        _ = timeline.presentationTime(for: CMTime(seconds: 20, preferredTimescale: 600))
+        XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 70, preferredTimescale: 600)).seconds, 60, accuracy: 0.001)
+    }
+
+    func testPauseResumeRemovesDuration() {
+        var timeline = RecordingTimeline()
+        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
+        timeline.pause(at: CMTime(seconds: 20, preferredTimescale: 600))
+        timeline.resume(at: CMTime(seconds: 35, preferredTimescale: 600))
+        XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 50, preferredTimescale: 600)).seconds, 25, accuracy: 0.001)
+    }
+}
+```
+
+- [ ] **步骤 2：验证测试**
+
+运行：`rtk swift test --filter RecordingSessionTests`
+
+预期：PASS once timeline exists; this locks behavior before integration.
+
+- [ ] **步骤 3：实现 session**
+
+`RecordingSession` must:
+
+- Own `sessionQueue`.
+- Own `RecordingTimeline`.
+- Own `RecordingWriter`.
+- Own last complete video sample and last video presentation time.
+- Own `AECAudioClock`.
+- Expose async `start`, `appendVideo`, `appendSystemAudio`, `appendDefaultMicBuffer`, `appendAECMicBuffer`, `appendExternalMic`, `pause`, `resume`, `stop`.
+- Ensure timeline and last-frame mutations only happen on `sessionQueue`.
+- Reject all sample appends after stopping.
+- Call finalizer after writer finish.
+
+Required public shape:
+
+```swift
+public final class RecordingSession {
+    public init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing)
+    public func start() throws
+    public func appendVideo(_ sampleBuffer: CMSampleBuffer)
+    public func appendSystemAudio(_ sampleBuffer: CMSampleBuffer)
+    public func appendDefaultMicBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime)
+    public func appendAECMicBuffer(_ buffer: AVAudioPCMBuffer)
+    public func appendExternalMic(_ sampleBuffer: CMSampleBuffer)
+    public func pause(at sourceTime: CMTime)
+    public func resume(at sourceTime: CMTime)
+    public func stop(at sourceTime: CMTime, completion: @escaping (Result<RecordingOutput, Error>) -> Void)
+}
+```
+
+- [ ] **步骤 4：验证**
+
+运行：`rtk swift test`
+
+预期：PASS.
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingSession.swift Tests/RecordingCoreTests/RecordingSessionTests.swift
+git commit -m "feat: add recording session"
+```
+
+## 任务 6：实现完整 RecordingFinalizer
+
+**文件：**
+- 创建：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingFinalizerTests.swift`
+
+- [ ] **步骤 1：写 finalizer 测试**
+
+```swift
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class RecordingFinalizerTests: XCTestCase {
+    func testVideoRemuxUsesFinalDurationNotAssetDuration() {
+        let finalizer = RecordingFinalizer()
+        let range = finalizer.outputTimeRange(finalDuration: CMTime(seconds: 42, preferredTimescale: 600))
+        XCTAssertEqual(range.start, .zero)
+        XCTAssertEqual(range.duration.seconds, 42, accuracy: 0.001)
+    }
+
+    func testFailedRemuxPreservesIntermediateFiles() {
+        let policy = RecordingFinalizerFilePolicy()
+        XCTAssertFalse(policy.shouldDeleteIntermediateFiles(remuxSucceeded: false))
+        XCTAssertTrue(policy.shouldDeleteIntermediateFiles(remuxSucceeded: true))
+    }
+}
+```
+
+- [ ] **步骤 2：验证失败**
+
+运行：`rtk swift test --filter RecordingFinalizerTests`
+
+预期：FAIL，缺少 `RecordingFinalizer` 或 `RecordingFinalizerFilePolicy`。
+
+- [ ] **步骤 3：实现 finalizer 接口**
+
+Required public shape:
+
+```swift
+public protocol RecordingFinalizing {
+    func finalize(_ request: RecordingFinalizerRequest, completion: @escaping (Result<RecordingOutput, Error>) -> Void)
+}
+
+public struct RecordingFinalizer: RecordingFinalizing {
+    public init()
+    public func finalize(_ request: RecordingFinalizerRequest, completion: @escaping (Result<RecordingOutput, Error>) -> Void)
+    public func outputTimeRange(finalDuration: CMTime) -> CMTimeRange
+}
+
+public struct RecordingFinalizerFilePolicy {
+    public init()
+    public func shouldDeleteIntermediateFiles(remuxSucceeded: Bool) -> Bool
+}
+```
+
+Implementation requirements:
+
+- For video without remux: return completed output after writer finish.
+- For video remux: use `finalDuration`, never `asset.duration` as the controlling duration.
+- For pure audio qma: wait for system audio close and mic writer finish before package load/export.
+- Delete intermediate files only after final export success.
+- Preserve source/intermediate files on failure.
+- Return user-displayable error categories.
+
+- [ ] **步骤 4：验证**
+
+运行：`rtk swift test`
+
+预期：PASS.
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingFinalizer.swift Tests/RecordingCoreTests/RecordingFinalizerTests.swift
+git commit -m "feat: add recording finalizer"
+```
+
+## 任务 7：把 RecordingCore 加入 Xcode app target
+
+**文件：**
+- 修改：`QuickRecorder.xcodeproj/project.pbxproj`
+
+- [ ] **步骤 1：添加所有 RecordingCore Swift 文件到 app target**
+
+Add these files to the QuickRecorder group and Sources build phase:
+
+```text
+RecordingTimeline.swift
+SampleRetiming.swift
+AudioSampleBufferFactory.swift
+AECAudioClock.swift
+RecordingWriter.swift
+RecordingSession.swift
+RecordingFinalizer.swift
+```
+
+- [ ] **步骤 2：验证**
+
+运行：
+
+```bash
+rtk swift test
+rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+```
+
+预期：PASS and BUILD SUCCEEDED.
+
+- [ ] **步骤 3：Commit**
+
+```bash
+git add QuickRecorder.xcodeproj/project.pbxproj
+git commit -m "build: include recording core"
+```
+
+## 任务 8：切断旧 writer 状态并接入 session
+
+**文件：**
+- 修改：`QuickRecorder/SCContext.swift`
+- 修改：`QuickRecorder/RecordEngine.swift`
+- 修改：`QuickRecorder/ViewModel/StatusBar.swift`
+
+- [ ] **步骤 1：删除旧媒体状态**
+
+从 `SCContext` 删除或停止使用：
+
+```swift
+frameCache
+isResume
+isSkipFrame
+lastPTS
+timeOffset
+audioFile2
+vW
+vwInput
+awInput
+micInput
+```
+
+新增：
+
+```swift
+static var recordingSession: RecordingSession?
+```
+
+- [ ] **步骤 2：修复 minimumFrameInterval**
+
+使用：
+
+```swift
+conf.minimumFrameInterval = audioOnly ? .zero : CMTime(value: 1, timescale: CMTimeScale(frameRate))
+```
+
+- [ ] **步骤 3：创建 session**
+
+在开始采集前构造 `RecordingSessionConfiguration` 并调用：
+
+```swift
+SCContext.recordingSession = RecordingSession(configuration: configuration, finalizer: RecordingFinalizer())
+try SCContext.recordingSession?.start()
+```
+
+- [ ] **步骤 4：转发 sample**
+
+所有回调必须转发：
+
+```swift
+SCContext.recordingSession?.appendVideo(sampleBuffer)
+SCContext.recordingSession?.appendSystemAudio(sampleBuffer)
+SCContext.recordingSession?.appendDefaultMicBuffer(buffer, time: time)
+SCContext.recordingSession?.appendAECMicBuffer(pcmBuffer)
+SCContext.recordingSession?.appendExternalMic(sampleBuffer)
+```
+
+`RecordEngine.swift`、`AudioRecorder.captureOutput` 和麦克风 tap 中不得直接访问 writer/input。
+
+- [ ] **步骤 5：pause/stop 异步转发**
+
+`SCContext.pauseRecording()` 转发 session pause/resume。
+
+`SCContext.stopRecording()` 调用 session stop 后返回，completion 中清理 UI 和状态。不得使用 `DispatchGroup.wait()`。
+
+- [ ] **步骤 6：状态栏使用 session display time**
+
+`StatusBar.swift` 读取 session 的 elapsed display time；没有 session 时回退为当前显示。
+
+- [ ] **步骤 7：验证**
+
+运行：
+
+```bash
+rtk swift test
+rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+rtk rg -n "SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|CMTime\\(value: 1, timescale: 0\\)|asSampleBuffer!|DispatchGroup\\(\\).*wait|\\.append\\(" QuickRecorder
+```
+
+预期：
+
+- Tests pass.
+- Build succeeds.
+- rg 不出现旧状态、非法 CMTime、强制解包。
+- `.append(` 匹配只允许出现在 `RecordingWriter.swift` 和非 writer 语义的数组操作中；任何 `AVAssetWriterInput.append` 在其他文件出现都必须修复。
+
+- [ ] **步骤 8：Commit**
+
+```bash
+git add QuickRecorder/SCContext.swift QuickRecorder/RecordEngine.swift QuickRecorder/ViewModel/StatusBar.swift
+git commit -m "refactor: route recording through single session"
+```
+
+## 任务 9：完整后处理和问题记录更新
+
+**文件：**
+- 修改：`QuickRecorder/SCContext.swift`
+- 修改：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
+- 修改：`docs/recording-issues.md`
+
+- [ ] **步骤 1：替换旧 remux 调用**
+
+All remux calls must go through `RecordingFinalizer` and pass `finalDuration`.
+
+- [ ] **步骤 2：替换纯音频 qma 流程**
+
+Pure audio qma export must be triggered only by finalizer completion. Remove any remaining direct `vW.finishWriting {}` branch.
+
+- [ ] **步骤 3：更新问题记录**
+
+For each QR-REC item, set status to:
+
+```markdown
+- 状态：已实现，等待最终人工验证
+```
+
+After manual verification, update verified items to:
+
+```markdown
+- 状态：已修复并通过验证
+```
+
+- [ ] **步骤 4：验证**
+
+运行：
+
+```bash
+rtk swift test
+rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+rtk rg -n "vW\\.finishWriting|asset\\.duration\\)|SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|asSampleBuffer!|CMTime\\(value: 1, timescale: 0\\)" QuickRecorder
+```
+
+预期：测试和构建成功，rg 无输出。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/SCContext.swift QuickRecorder/RecordingCore/RecordingFinalizer.swift docs/recording-issues.md
+git commit -m "fix: finalize recordings through recording core"
+```
+
+## 任务 10：最终人工回归
+
+**文件：**
+- 修改：`docs/recording-issues.md`
+
+- [ ] **步骤 1：运行自动验证**
+
+```bash
+rtk swift test
+rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+rtk rg -n "SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|asSampleBuffer!|CMTime\\(value: 1, timescale: 0\\)|DispatchGroup\\(\\).*wait|vW\\.finishWriting" QuickRecorder
+```
+
+预期：PASS、BUILD SUCCEEDED、rg 无输出。
+
+- [ ] **步骤 2：人工验证清单**
+
+```markdown
+- [ ] 静止画面录制 2 分钟，输出 duration 接近 2 分钟。
+- [ ] 录制 30 秒，中途暂停 10 秒，输出 duration 接近 20 秒。
+- [ ] 屏幕 + 系统音频。
+- [ ] 屏幕 + 默认麦克风。
+- [ ] 屏幕 + AEC 麦克风。
+- [ ] 屏幕 + 外接麦克风。
+- [ ] 屏幕 + 系统音频 + 麦克风 + remux。
+- [ ] 纯系统音频 + 麦克风。
+- [ ] 60 FPS 默认设置启动录制，minimumFrameInterval 合法。
+- [ ] 停止录制后立即预览，文件可播放。
+```
+
+- [ ] **步骤 3：更新问题记录为验证结果**
+
+Update `docs/recording-issues.md` statuses based on the checklist.
+
+- [ ] **步骤 4：Commit**
+
+```bash
+git add docs/recording-issues.md
+git commit -m "docs: record recording stability verification"
+```
