@@ -4,6 +4,23 @@ import Foundation
 import CoreMedia
 import Foundation
 
+public protocol RecordingSourceClock {
+    func currentSourceTime() -> CMTime
+    func sourceTime(forHostTime hostTime: UInt64) -> CMTime?
+}
+
+public struct HostTimeRecordingSourceClock: RecordingSourceClock {
+    public init() {}
+
+    public func currentSourceTime() -> CMTime {
+        CMClockGetTime(CMClockGetHostTimeClock())
+    }
+
+    public func sourceTime(forHostTime hostTime: UInt64) -> CMTime? {
+        CMClockMakeHostTimeFromSystemUnits(hostTime)
+    }
+}
+
 public struct RecordingTimeline {
     public private(set) var sourceStartTime: CMTime?
     public private(set) var accumulatedPauseDuration: CMTime = .zero
@@ -32,10 +49,13 @@ public struct RecordingTimeline {
 
     public mutating func resume(at sourceTime: CMTime) {
         guard let pauseStart = pauseStartSourceTime else { return }
-        accumulatedPauseDuration = CMTimeAdd(
-            accumulatedPauseDuration,
-            CMTimeMaximum(.zero, CMTimeSubtract(sourceTime, pauseStart))
-        )
+        if let sourceStartTime {
+            let countedPauseStart = CMTimeMaximum(sourceStartTime, pauseStart)
+            accumulatedPauseDuration = CMTimeAdd(
+                accumulatedPauseDuration,
+                CMTimeMaximum(.zero, CMTimeSubtract(sourceTime, countedPauseStart))
+            )
+        }
         pauseStartSourceTime = nil
     }
 

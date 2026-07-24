@@ -28,9 +28,13 @@ public final class RecordingSession {
     private let finalizer: RecordingFinalizing
     private let writer: RecordingWriter?
     private let writerCreationError: Error?
+    private let sourceClock: RecordingSourceClock
     private let sessionQueue = DispatchQueue(label: "QuickRecorder.RecordingSession")
     private var state: State = .idle
     private var timeline = RecordingTimeline()
+    private var displayStartSourceTime: CMTime?
+    private var displayPauseStartSourceTime: CMTime?
+    private var displayAccumulatedPauseDuration: CMTime = .zero
     private var lastVideoSample: CMSampleBuffer?
     private var lastVideoPresentationTime: CMTime?
     private var aecClock: AECAudioClock?
@@ -39,6 +43,7 @@ public final class RecordingSession {
     public init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing) {
         self.configuration = configuration
         self.finalizer = finalizer
+        self.sourceClock = HostTimeRecordingSourceClock()
         do {
             writer = try RecordingWriter(configuration: configuration.writerConfiguration)
             writerCreationError = nil
@@ -48,22 +53,40 @@ public final class RecordingSession {
         }
     }
 
-    init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing, writer: RecordingWriter) {
+    init(
+        configuration: RecordingSessionConfiguration,
+        finalizer: RecordingFinalizing,
+        writer: RecordingWriter,
+        sourceClock: RecordingSourceClock = HostTimeRecordingSourceClock()
+    ) {
         self.configuration = configuration
         self.finalizer = finalizer
         self.writer = writer
         self.writerCreationError = nil
+        self.sourceClock = sourceClock
     }
 
-    init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing, writerCreationError: Error) {
+    init(
+        configuration: RecordingSessionConfiguration,
+        finalizer: RecordingFinalizing,
+        writerCreationError: Error,
+        sourceClock: RecordingSourceClock = HostTimeRecordingSourceClock()
+    ) {
         self.configuration = configuration
         self.finalizer = finalizer
         self.writer = nil
         self.writerCreationError = writerCreationError
+        self.sourceClock = sourceClock
     }
 
     public var rejectedSampleCount: Int {
         sessionQueue.sync { rejectedSamples }
+    }
+
+    public var elapsedDisplayTime: TimeInterval {
+        sessionQueue.sync {
+            displayElapsedTime(at: sourceClock.currentSourceTime()).seconds
+        }
     }
 
     public func start() throws {
@@ -83,6 +106,7 @@ public final class RecordingSession {
                 throw RecordingSessionError.writerStartFailed(error)
             }
             state = .recording
+            displayStartSourceTime = sourceClock.currentSourceTime()
         }
     }
 
@@ -103,8 +127,10 @@ public final class RecordingSession {
     public func appendDefaultMicBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
         sessionQueue.async {
             guard self.acceptsSamples else { return self.rejectSample() }
-            guard time.isSampleTimeValid, time.sampleRate > 0 else { return self.rejectSample() }
-            let sourceTime = CMTime(value: time.sampleTime, timescale: CMTimeScale(time.sampleRate))
+            guard time.isHostTimeValid,
+                  let sourceTime = self.sourceClock.sourceTime(forHostTime: time.hostTime) else {
+                return self.rejectSample()
+            }
             self.append(buffer, sourceTime: sourceTime)
         }
     }
@@ -116,7 +142,7 @@ public final class RecordingSession {
             if self.aecClock == nil {
                 self.aecClock = AECAudioClock(
                     sampleRate: buffer.format.sampleRate,
-                    startTime: self.timeline.sourceStartTime ?? .zero
+                    startTime: self.timeline.sourceStartTime ?? self.sourceClock.currentSourceTime()
                 )
             }
             guard var aecClock = self.aecClock else { return self.rejectSample() }
@@ -133,69 +159,117 @@ public final class RecordingSession {
         }
     }
 
-    public func pause(at sourceTime: CMTime) {
+    public func pause() {
         sessionQueue.async {
-            guard case .recording = self.state else { return }
-            self.timeline.pause(at: sourceTime)
-            self.state = .paused
+            self.pauseLocked(at: self.sourceClock.currentSourceTime())
         }
     }
 
-    public func resume(at sourceTime: CMTime) {
+    func pause(at sourceTime: CMTime) {
         sessionQueue.async {
-            guard case .paused = self.state else { return }
-            self.timeline.resume(at: sourceTime)
-            self.state = .recording
+            self.pauseLocked(at: sourceTime)
         }
     }
 
-    public func stop(at sourceTime: CMTime, completion: @escaping (Result<RecordingOutput, Error>) -> Void) {
+    public func resume() {
         sessionQueue.async {
-            guard self.state == .recording || self.state == .paused else {
-                DispatchQueue.main.async { completion(.failure(RecordingSessionError.invalidStop)) }
-                return
-            }
-            if self.state == .paused {
-                self.timeline.resume(at: sourceTime)
-            }
-            self.state = .stopping
-            let finalDuration = self.timeline.finalDuration(at: sourceTime)
-            let tailVideoSample = self.tailVideoSample(at: finalDuration)
+            self.resumeLocked(at: self.sourceClock.currentSourceTime())
+        }
+    }
 
-            guard let writer = self.writer else {
-                self.state = .stopped
-                self.complete(
-                    .failure(RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)),
-                    using: completion
-                )
-                return
-            }
-            writer.finish(finalDuration: finalDuration, tailVideoSample: tailVideoSample) { result in
-                self.sessionQueue.async {
-                    guard case .success = result else {
-                        self.state = .stopped
-                        if case let .failure(error) = result {
-                            self.complete(.failure(error), using: completion)
-                        }
-                        return
-                    }
-                    self.state = .stopped
-                    let request = RecordingFinalizerRequest(
-                        sourceURL: self.configuration.writerConfiguration.outputURL,
-                        outputURL: self.configuration.writerConfiguration.outputURL,
-                        finalDuration: finalDuration,
-                        mode: self.configuration.finalizerMode
-                    )
-                    self.finalizer.finalize(request) { result in
-                        self.complete(result, using: completion)
-                    }
-                }
-            }
+    func resume(at sourceTime: CMTime) {
+        sessionQueue.async {
+            self.resumeLocked(at: sourceTime)
+        }
+    }
+
+    public func stop(completion: @escaping (Result<RecordingOutput, Error>) -> Void) {
+        sessionQueue.async {
+            self.stopLocked(at: self.sourceClock.currentSourceTime(), completion: completion)
+        }
+    }
+
+    func stop(at sourceTime: CMTime, completion: @escaping (Result<RecordingOutput, Error>) -> Void) {
+        sessionQueue.async {
+            self.stopLocked(at: sourceTime, completion: completion)
         }
     }
 
     private var acceptsSamples: Bool {
         state == .recording
+    }
+
+    private func pauseLocked(at sourceTime: CMTime) {
+        guard case .recording = state else { return }
+        timeline.pause(at: sourceTime)
+        displayPauseStartSourceTime = sourceTime
+        state = .paused
+    }
+
+    private func resumeLocked(at sourceTime: CMTime) {
+        guard case .paused = state else { return }
+        timeline.resume(at: sourceTime)
+        if let displayPauseStartSourceTime {
+            displayAccumulatedPauseDuration = CMTimeAdd(
+                displayAccumulatedPauseDuration,
+                CMTimeMaximum(.zero, CMTimeSubtract(sourceTime, displayPauseStartSourceTime))
+            )
+            self.displayPauseStartSourceTime = nil
+        }
+        state = .recording
+    }
+
+    private func displayElapsedTime(at sourceTime: CMTime) -> CMTime {
+        guard let displayStartSourceTime else { return .zero }
+        let endTime = displayPauseStartSourceTime ?? sourceTime
+        let elapsed = CMTimeSubtract(endTime, displayStartSourceTime)
+        return CMTimeMaximum(.zero, CMTimeSubtract(elapsed, displayAccumulatedPauseDuration))
+    }
+
+    private func stopLocked(
+        at sourceTime: CMTime,
+        completion: @escaping (Result<RecordingOutput, Error>) -> Void
+    ) {
+        guard state == .recording || state == .paused else {
+            DispatchQueue.main.async { completion(.failure(RecordingSessionError.invalidStop)) }
+            return
+        }
+        if state == .paused {
+            resumeLocked(at: sourceTime)
+        }
+        state = .stopping
+        let finalDuration = timeline.finalDuration(at: sourceTime)
+        let tailVideoSample = tailVideoSample(at: finalDuration)
+
+        guard let writer else {
+            state = .stopped
+            complete(
+                .failure(RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)),
+                using: completion
+            )
+            return
+        }
+        writer.finish(finalDuration: finalDuration, tailVideoSample: tailVideoSample) { result in
+            self.sessionQueue.async {
+                guard case .success = result else {
+                    self.state = .stopped
+                    if case let .failure(error) = result {
+                        self.complete(.failure(error), using: completion)
+                    }
+                    return
+                }
+                self.state = .stopped
+                let request = RecordingFinalizerRequest(
+                    sourceURL: self.configuration.writerConfiguration.outputURL,
+                    outputURL: self.configuration.writerConfiguration.outputURL,
+                    finalDuration: finalDuration,
+                    mode: self.configuration.finalizerMode
+                )
+                self.finalizer.finalize(request) { result in
+                    self.complete(result, using: completion)
+                }
+            }
+        }
     }
 
     private func append(_ sampleBuffer: CMSampleBuffer, as media: Media) {
