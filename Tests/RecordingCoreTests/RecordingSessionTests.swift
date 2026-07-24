@@ -187,6 +187,47 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertEqual(finalizer.requests[0].finalDuration.seconds, 5, accuracy: 0.001)
     }
 
+    func testDefaultMicRejectsInvalidHostTime() throws {
+        let session = RecordingSession(
+            configuration: .test(),
+            finalizer: RecordingFinalizerSpy(),
+            writer: RecordingWriter(adapter: RecordingWriterTestAdapter())
+        )
+        try session.start()
+
+        session.appendDefaultMicBuffer(
+            try makeAudioBuffer(),
+            time: AVAudioTime(sampleTime: 0, atRate: 48_000)
+        )
+        let completion = expectation(description: "stopped")
+        session.stop(at: CMTime(seconds: 1, preferredTimescale: 600)) { _ in
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+        XCTAssertEqual(session.rejectedSampleCount, 1)
+    }
+
+    func testDefaultMicRejectsWhenHostTimeCannotBeConverted() throws {
+        let clock = DeterministicRecordingSourceClock(currentTime: CMTime(seconds: 10, preferredTimescale: 600))
+        let session = RecordingSession(
+            configuration: .test(),
+            finalizer: RecordingFinalizerSpy(),
+            writer: RecordingWriter(adapter: RecordingWriterTestAdapter()),
+            sourceClock: clock
+        )
+        try session.start()
+
+        session.appendDefaultMicBuffer(try makeAudioBuffer(), time: AVAudioTime(hostTime: 123))
+        let completion = expectation(description: "stopped")
+        session.stop(at: CMTime(seconds: 1, preferredTimescale: 600)) { _ in
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+        XCTAssertEqual(session.rejectedSampleCount, 1)
+    }
+
     func testAECClockUsesContinuousFramesFromSessionClock() throws {
         let clock = DeterministicRecordingSourceClock(currentTime: CMTime(seconds: 10, preferredTimescale: 600))
         let finalizer = RecordingFinalizerSpy()
