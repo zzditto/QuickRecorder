@@ -46,7 +46,8 @@ struct ContentViewNew: View {
                     Divider().frame(height: 70)
                     Button(action: {
                         closeMainWindow()
-                        SCContext.updateAvailableContent {
+                        SCContext.updateAvailableContent { status in
+                            guard status == .available else { return }
                             DispatchQueue.main.async {
                                 appDelegate.showAreaSelector(size: NSSize(width: 600, height: 450))
                                 var currentDisplay = SCContext.getSCDisplayWithMouse()

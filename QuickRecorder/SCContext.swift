@@ -42,60 +42,68 @@ class SCContext {
     static var streamType: StreamType?
     static var availableContent: SCShareableContent?
     static let excludedApps = ["", "com.apple.dock", "com.apple.screencaptureui", "com.apple.controlcenter", "com.apple.notificationcenterui", "com.apple.systemuiserver", "com.apple.WindowManager", "dev.mnpn.Azayaka", "com.gaosun.eul", "com.pointum.hazeover", "net.matthewpalmer.Vanilla", "com.dwarvesv.minimalbar", "com.bjango.istatmenus.status"]
+    private static let permissionPromptGate = ScreenCapturePermissionPromptGate()
     
     static func updateAvailableContentSync() -> SCShareableContent? {
         let semaphore = DispatchSemaphore(value: 0)
-        var result: SCShareableContent? = nil
+        var result: SCShareableContent?
 
-        updateAvailableContent { content in
+        fetchAvailableContent(onScreenWindowsOnly: true) { content, _ in
             result = content
             semaphore.signal()
         }
 
-        semaphore.wait()
+        guard semaphore.wait(timeout: .now() + 5) == .success else {
+            print("Timed out while fetching available screen capture content".local)
+            return nil
+        }
         return result
     }
-    
-    private static func updateAvailableContent(completion: @escaping (SCShareableContent?) -> Void) {
-        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { [self] content, error in
-            if let error = error {
-                switch error {
-                case SCStreamError.userDeclined:
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                        self.updateAvailableContent() {_ in}
-                    }
-                default:
+
+    private static func fetchAvailableContent(
+        onScreenWindowsOnly: Bool,
+        completion: @escaping (SCShareableContent?, ScreenCaptureContentStatus) -> Void
+    ) {
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: onScreenWindowsOnly) { content, error in
+            if let error {
+                let status = contentStatus(for: error)
+                if status != .accessDenied {
                     print("Error: failed to fetch available content: ".local, error.localizedDescription)
                 }
-                completion(nil) // 在错误情况下返回 nil
+                completion(nil, status)
+                return
+            }
+
+            guard let content, !content.displays.isEmpty else {
+                print("There needs to be at least one display connected!".local)
+                completion(nil, .unavailable)
                 return
             }
 
             availableContent = content
-            if let displays = content?.displays, !displays.isEmpty {
-                completion(content) // 返回成功获取的 content
-            } else {
-                print("There needs to be at least one display connected!".local)
-                completion(nil) // 如果没有显示器连接，则返回 nil
-            }
+            completion(content, .available)
         }
     }
-    
-    static func updateAvailableContent(completion: @escaping () -> Void) {
-        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { content, error in
-            if let error = error {
-                switch error {
-                case SCStreamError.userDeclined: requestPermissions()
-                default: print("Error: failed to fetch available content: ".local, error.localizedDescription)
-                }
-                return
+
+    static func updateAvailableContent(completion: @escaping (ScreenCaptureContentStatus) -> Void) {
+        fetchAvailableContent(onScreenWindowsOnly: false) { _, status in
+            let decision = ScreenCaptureContentRefreshPolicy.decision(for: status, origin: .userInitiated)
+            if case .showPermissionGuide = decision {
+                requestPermissions()
             }
-            availableContent = content
-            assert(availableContent?.displays.isEmpty != nil, "There needs to be at least one display connected!".local)
-            completion()
+            completion(status)
         }
     }
-    
+
+    private static func contentStatus(for error: Error) -> ScreenCaptureContentStatus {
+        switch error {
+        case SCStreamError.userDeclined:
+            return .accessDenied
+        default:
+            return .unavailable
+        }
+    }
+
     static func getSelf() -> SCRunningApplication? {
         return SCContext.availableContent!.applications.first(where: { Bundle.main.bundleIdentifier == $0.bundleIdentifier })
     }
@@ -254,7 +262,11 @@ class SCContext {
     }
     
     private static func requestPermissions() {
+        guard permissionPromptGate.acquire() else { return }
+
         DispatchQueue.main.async {
+            defer { permissionPromptGate.release() }
+
             let alert = createAlert(title: "Permission Required",
                                                        message: "QuickRecorder needs screen recording permissions, even if you only intend on recording audio.",
                                                        button1: "Open Settings",

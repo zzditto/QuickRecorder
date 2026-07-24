@@ -292,7 +292,8 @@ class WindowSelectorViewModel: NSObject, ObservableObject, SCStreamDelegate, SCS
     }
 
     func setupStreams(filter: Bool = true, capture: Bool = true) {
-        SCContext.updateAvailableContent {
+        SCContext.updateAvailableContent { status in
+            guard status == .available else { return }
             Task {
                 do {
                     self.streams.removeAll()

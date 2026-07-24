@@ -19,7 +19,6 @@ import Sparkle
 let isMacOS12 = ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 12
 let isMacOS14 = ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 14
 let isMacOS15 = ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 15
-var scPerm = false
 let fd = FileManager.default
 let ud = UserDefaults.standard
 var statusBarItem: NSStatusItem!
@@ -199,8 +198,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, SCStreamDelegate, SCStreamOu
     }
     
     func applicationWillFinishLaunching(_ notification: Notification) {
-        scPerm = SCContext.updateAvailableContentSync() != nil
-        
         let process = NSWorkspace.shared.runningApplications.filter({ $0.bundleIdentifier == "com.lihaoyun6.QuickRecorder" })
         if process.count > 1 {
             DispatchQueue.main.async {

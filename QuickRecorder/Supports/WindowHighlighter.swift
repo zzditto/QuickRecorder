@@ -271,7 +271,7 @@ class WindowHighlighter {
     
     func getSCWindowWithID(_ windowID: UInt32?) -> SCWindow? {
         guard let windowID else { return nil }
-        _ = SCContext.updateAvailableContentSync()
+        guard SCContext.updateAvailableContentSync() != nil else { return nil }
         let windows = SCContext.getWindows()
         return windows.first(where: { $0.windowID == windowID })
     }
