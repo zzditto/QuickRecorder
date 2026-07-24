@@ -32,14 +32,38 @@
 - 修改：`QuickRecorder/ViewModel/StatusBar.swift`
 - 修改：`docs/recording-issues.md`
 
-## 全局执行约束
+## 执行约束和阶段门禁
 
-- 不允许新增或保留 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume`。
-- 不允许在 `RecordingWriter` 以外调用 `AVAssetWriterInput.append`。
-- 不允许在录制停止路径使用 `DispatchGroup.wait()`。
-- 不允许使用 `CMTime(value: 1, timescale: 0)`。
-- 不允许使用 `asSampleBuffer!`。
+本计划采用分阶段切换，但最终结果必须是单一录制内核；不得新增第二套 writer 路径、不得设置过渡兼容层、不得把旧路径作为长期 fallback 保留。
+
+### 每个任务都必须遵守
+
+- 不允许新增 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume` 的新引用或新依赖。
+- 不允许新增 `RecordingWriter` 以外的 `AVAssetWriterInput.append` 调用。
+- 不允许新增录制停止路径中的 `DispatchGroup.wait()`。
+- 不允许新增 `CMTime(value: 1, timescale: 0)`。
+- 不允许新增 `asSampleBuffer!`。
 - 每个任务完成后必须运行该任务指定验证命令。
+
+### 任务 1 至任务 7 的中间态允许项
+
+- 任务 1 至任务 7 只建立和验证新的 `RecordingCore`，尚未切断 app 内旧录制路径；这些任务可以与仓库中已有的旧 `SCContext` writer/timing 状态共存。
+- 中间态允许项只适用于任务开始前已经存在的旧代码。任何任务都不得扩大旧路径、不得新增对旧状态的调用、不得让新核心依赖旧状态。
+- 审查任务 1 至任务 7 时，应检查本任务 diff 是否新增旧路径使用，而不是要求全仓库已经清除历史旧状态。
+
+### 任务 8 起的切换门禁
+
+- 任务 8 必须切断 app 旧 writer 状态并接入 `RecordingSession`；从任务 8 完成后开始，全仓库不得再存在 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume`。
+- 任务 8 完成后，录制路径中的所有 `AVAssetWriterInput.append`、`markAsFinished`、`finishWriting`、`endSession` 都只能由 `RecordingWriter` 管理。
+- 任务 9 和任务 10 的 `rg` 验证必须对最终不变量清零；如果仍有旧状态或旧 writer 直写路径，任务不得通过。
+
+### 最终不变量
+
+- 不存在 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume`。
+- 不存在 `CMTime(value: 1, timescale: 0)`。
+- 不存在 `asSampleBuffer!`。
+- 不存在录制路径直接调用 `AVAssetWriterInput.append`，除 `RecordingWriter` 内部。
+- 不存在录制停止路径使用 `DispatchGroup.wait()` 阻塞 UI。
 
 ## 任务 1：建立 RecordingCore 测试入口
 

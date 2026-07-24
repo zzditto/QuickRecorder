@@ -8,6 +8,8 @@ QuickRecorder 当前录制链路把 ScreenCaptureKit、AVAudioEngine、AVCapture
 
 本设计要求做完整系统修复：录制媒体时间、写入、停止、后处理由单一录制内核负责。不得保留旧 writer 直写路径，不设置过渡兼容层，不把关键问题留到后续阶段。
 
+实现允许先建立可测试的新 `RecordingCore`，再在明确的切换任务中接入 app 录制路径。切换前的中间提交可以与仓库已有旧录制代码共存，但不得新增旧 writer/timing 状态引用，不得让新核心依赖旧状态；切换任务完成后，旧 writer 直写路径和旧 timing 状态必须从录制路径中彻底移除。
+
 ## 目标
 
 - 静止画面长时间录制时，输出视频 duration 接近真实录制时长。
@@ -36,6 +38,22 @@ QuickRecorder 当前录制链路把 ScreenCaptureKit、AVAudioEngine、AVCapture
 - `AudioSampleBufferFactory`：把 `AVAudioPCMBuffer` 转为带明确 PTS 的 `CMSampleBuffer`。
 
 `SCContext` 只保留 UI 可见状态、当前 stream、当前选择对象和入口转发，不再保存 writer、writer input、`lastPTS`、`timeOffset` 等媒体写入状态。
+
+## 实施门禁
+
+### 切换前
+
+- 新增代码必须进入 `RecordingCore`，并通过 SwiftPM/XCTest 独立验证。
+- 不得新增 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume` 的引用。
+- 不得新增 `RecordingWriter` 以外的 writer append/finish 逻辑。
+- 不得新增 `CMTime(value: 1, timescale: 0)`、`asSampleBuffer!` 或停止路径同步等待。
+
+### 切换任务完成后
+
+- `SCContext`、`RecordEngine`、麦克风回调和后处理入口只能转发给 `RecordingSession` / `RecordingFinalizer`。
+- 旧 writer/input/timing 状态必须在全仓库 grep 清零。
+- 录制路径中的 writer 生命周期必须只由 `RecordingWriter` 管理。
+- 后处理必须只读取 writer 已完成的文件，并以 `finalDuration` 作为裁剪依据。
 
 ## 状态边界
 
