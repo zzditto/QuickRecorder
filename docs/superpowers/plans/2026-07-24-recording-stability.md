@@ -47,17 +47,17 @@
 - 不允许新增 `asSampleBuffer!`。
 - 每个任务完成后必须运行该任务指定验证命令。
 
-### 任务 1 至任务 7 的中间态允许项
+### 任务 1 至任务 9 的中间态允许项
 
-- 任务 1 至任务 7 只建立和验证新的 `RecordingCore`，尚未切断 app 内旧录制路径；这些任务可以与仓库中已有的旧 `SCContext` writer/timing 状态共存。
+- 任务 1 至任务 9 只建立、补齐和验证新的 `RecordingCore`，尚未切断 app 内旧录制路径；这些任务可以与仓库中已有的旧 `SCContext` writer/timing 状态共存。
 - 中间态允许项只适用于任务开始前已经存在的旧代码。任何任务都不得扩大旧路径、不得新增对旧状态的调用、不得让新核心依赖旧状态。
-- 审查任务 1 至任务 7 时，应检查本任务 diff 是否新增旧路径使用，而不是要求全仓库已经清除历史旧状态。
+- 审查任务 1 至任务 9 时，应检查本任务 diff 是否新增旧路径使用，而不是要求全仓库已经清除历史旧状态。
 
-### 任务 8 起的切换门禁
+### 任务 10 起的切换门禁
 
-- 任务 8 必须切断 app 旧 writer 状态并接入 `RecordingSession`；从任务 8 完成后开始，全仓库不得再存在 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume`。
-- 任务 8 完成后，录制路径中的所有 `AVAssetWriterInput.append`、`markAsFinished`、`finishWriting`、`endSession` 都只能由 `RecordingWriter` 管理。
-- 任务 9 和任务 10 的 `rg` 验证必须对最终不变量清零；如果仍有旧状态或旧 writer 直写路径，任务不得通过。
+- 任务 10 必须切断 app 旧 writer 状态并接入 `RecordingSession`；从任务 10 完成后开始，全仓库不得再存在 `SCContext.vW`、`SCContext.vwInput`、`SCContext.awInput`、`SCContext.micInput`、`SCContext.lastPTS`、`SCContext.timeOffset`、`SCContext.isResume`。
+- 任务 10 完成后，录制路径中的所有 `AVAssetWriterInput.append`、`markAsFinished`、`finishWriting`、`endSession` 都只能由 `RecordingWriter` 管理。
+- 任务 11 和任务 12 的 `rg` 验证必须对最终不变量清零；如果仍有旧状态或旧 writer 直写路径，任务不得通过。
 
 ### 最终不变量
 
@@ -822,7 +822,150 @@ git add QuickRecorder.xcodeproj/project.pbxproj
 git commit -m "build: include recording core"
 ```
 
-## 任务 8：切断旧 writer 状态并接入 session
+## 任务 8：补齐 Session 时钟与显示状态
+
+**文件：**
+- 修改：`QuickRecorder/RecordingCore/RecordingTimeline.swift`
+- 修改：`QuickRecorder/RecordingCore/AECAudioClock.swift`
+- 修改：`QuickRecorder/RecordingCore/RecordingSession.swift`
+- 修改：`Tests/RecordingCoreTests/RecordingTimelineTests.swift`
+- 修改：`Tests/RecordingCoreTests/AECAudioClockTests.swift`
+- 修改：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
+
+- [ ] **步骤 1：写时钟和显示状态测试**
+
+新增测试必须覆盖：
+
+- 默认麦克风使用 `AVAudioTime.hostTime` 转换为统一 source PTS；不得只使用 `sampleTime / sampleRate`。
+- AEC 使用连续帧计数器，但第一个 AEC source time 必须锚定到 session source clock，而不是每个 buffer 的转换时刻 host clock。
+- `pause()` / `resume()` / `stop()` 可以由 session 内部时钟给出 source time；调用方不需要在 app 层维护旧 `timeOffset`。
+- `elapsedDisplayTime` 在录制时递增，暂停期间保持不变，恢复后不包含暂停时长。
+- 首个 video/audio/default mic/AEC/external mic 任一轨道先到都可以建立 timeline，PTS 单调。
+
+```swift
+func testDisplayTimeDoesNotAdvanceWhilePaused()
+func testDefaultMicUsesHostTimeSourceClock()
+func testAECClockUsesContinuousFramesFromSessionClock()
+func testStopWithoutExplicitSourceTimeUsesSessionClock()
+```
+
+- [ ] **步骤 2：验证失败**
+
+运行：
+
+```bash
+rtk swift test --filter RecordingSessionTests
+rtk swift test --filter AECAudioClockTests
+```
+
+预期：FAIL，缺少 session clock/display API 或 host-time conversion 行为。
+
+- [ ] **步骤 3：实现 session clock**
+
+实现要求：
+
+- `RecordingSession` 持有统一 source clock，默认使用 host clock；测试可注入 deterministic clock。
+- 新增线程安全 `public var elapsedDisplayTime: TimeInterval`。
+- 新增无参数 `pause()`、`resume()`、`stop(completion:)`，内部从 source clock 取时；保留带 sourceTime 的内部/test API。
+- 默认麦克风从 `AVAudioTime.hostTime` 转换到 source clock；若 hostTime 不可用则拒绝该 buffer 并计入 rejected。
+- AEC 只用 `AECAudioClock` 连续帧推进，初始时间来自 session source clock 或已建立的 timeline source start。
+- 不使用转换时刻 host clock 给每个 AEC buffer 打 PTS。
+
+```swift
+public protocol RecordingSourceClock {
+    func currentSourceTime() -> CMTime
+    func sourceTime(forHostTime hostTime: UInt64) -> CMTime?
+}
+```
+
+- [ ] **步骤 4：验证**
+
+运行：
+
+```bash
+rtk swift test
+rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+```
+
+预期：PASS and BUILD SUCCEEDED。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingTimeline.swift QuickRecorder/RecordingCore/AECAudioClock.swift QuickRecorder/RecordingCore/RecordingSession.swift Tests/RecordingCoreTests/RecordingTimelineTests.swift Tests/RecordingCoreTests/AECAudioClockTests.swift Tests/RecordingCoreTests/RecordingSessionTests.swift
+git commit -m "feat: add recording session clock"
+```
+
+## 任务 9：补齐输出模式与 Finalizer 后处理
+
+**文件：**
+- 修改：`QuickRecorder/RecordingCore/RecordingWriter.swift`
+- 修改：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
+- 修改：`QuickRecorder/RecordingCore/RecordingSession.swift`
+- 修改：`Tests/RecordingCoreTests/RecordingWriterStateTests.swift`
+- 修改：`Tests/RecordingCoreTests/RecordingFinalizerTests.swift`
+- 修改：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
+
+- [ ] **步骤 1：写输出模式测试**
+
+新增测试必须覆盖：
+
+- `RecordingSessionConfiguration` 能表达视频直出、视频双音轨 remux、纯系统音频单轨、qma package。
+- `RecordingFinalizer` 的 `videoWithRemux` 不再返回 integration-required 错误，并且控制 duration 使用 `finalDuration`。
+- `RecordingFinalizer` 的 `pureAudioPackage` 不再返回 integration-required 错误；qma request 必须显式包含 package URL、sys audio URL、mic audio URL 和 info。
+- remux/export 失败时保留源文件和中间文件；成功后才允许删除中间文件。
+- `RecordingWriter`/`RecordingSession` finish 后才触发 finalizer，finalizer 不读取未完成 writer 输出。
+
+- [ ] **步骤 2：验证失败**
+
+运行：
+
+```bash
+rtk swift test --filter RecordingFinalizerTests
+rtk swift test --filter RecordingSessionTests
+```
+
+预期：FAIL，`videoWithRemux` / `pureAudioPackage` 仍返回明确错误或缺少 request fields。
+
+- [ ] **步骤 3：实现输出模式**
+
+实现要求：
+
+- `RecordingSessionConfiguration` 必须显式描述输出：
+  - video direct output URL。
+  - video remux intermediate URL and final URL。
+  - pure audio single output URL。
+  - qma package URL、`sys.*` URL、`mic.*` URL、format/encoder/exportMP3/sysVol/micVol。
+- `RecordingFinalizerRequest` 必须携带 finalDuration 和上述输出信息。
+- `RecordingFinalizer.outputTimeRange(finalDuration:)` 是 remux 唯一控制 duration；不得使用 `asset.duration` 作为最终裁剪依据。
+- qma 生成只在 sys audio 和 mic writer 都完成后执行；失败时保留 package/intermediate files。
+- 删除所有 `remuxRequiresAppIntegration` / `audioPackageRequiresAppIntegration` 等占位错误。
+
+- [ ] **步骤 4：验证**
+
+运行：
+
+```bash
+rtk swift test
+rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+rtk rg -n "remuxRequiresAppIntegration|audioPackageRequiresAppIntegration|asset\\.duration\\)" QuickRecorder/RecordingCore QuickRecorder/SCContext.swift
+```
+
+预期：
+
+- Tests pass.
+- Build succeeds.
+- rg 无 integration-required 占位错误。
+- `asset.duration` 不出现在新的 finalizer duration 控制逻辑中。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingWriter.swift QuickRecorder/RecordingCore/RecordingFinalizer.swift QuickRecorder/RecordingCore/RecordingSession.swift Tests/RecordingCoreTests/RecordingWriterStateTests.swift Tests/RecordingCoreTests/RecordingFinalizerTests.swift Tests/RecordingCoreTests/RecordingSessionTests.swift
+git commit -m "feat: add recording output modes"
+```
+
+## 任务 10：切断旧 writer 状态并接入 Session
 
 **文件：**
 - 修改：`QuickRecorder/SCContext.swift`
@@ -862,12 +1005,14 @@ conf.minimumFrameInterval = audioOnly ? .zero : CMTime(value: 1, timescale: CMTi
 
 - [ ] **步骤 3：创建 session**
 
-在开始采集前构造 `RecordingSessionConfiguration` 并调用：
+在开始采集前构造完整 `RecordingSessionConfiguration` 并调用：
 
 ```swift
 SCContext.recordingSession = RecordingSession(configuration: configuration, finalizer: RecordingFinalizer())
 try SCContext.recordingSession?.start()
 ```
+
+配置必须覆盖视频、系统音频、默认麦克风、AEC、外接麦克风、纯音频、qma package 和 remux。
 
 - [ ] **步骤 4：转发 sample**
 
@@ -885,13 +1030,13 @@ SCContext.recordingSession?.appendExternalMic(sampleBuffer)
 
 - [ ] **步骤 5：pause/stop 异步转发**
 
-`SCContext.pauseRecording()` 转发 session pause/resume。
+`SCContext.pauseRecording()` 只更新 UI pause state 并调用 session pause/resume。
 
-`SCContext.stopRecording()` 调用 session stop 后返回，completion 中清理 UI 和状态。不得使用 `DispatchGroup.wait()`。
+`SCContext.stopRecording()` 先停止 ScreenCaptureKit 和麦克风采集，然后调用 session stop 并立即返回；completion 中统一预览、通知、trim、overlay/control panel 清理、sleep preventer 释放。不得使用 `DispatchGroup.wait()`。
 
 - [ ] **步骤 6：状态栏使用 session display time**
 
-`StatusBar.swift` 读取 session 的 elapsed display time；没有 session 时回退为当前显示。
+`StatusBar.swift` 读取 `SCContext.recordingSession?.elapsedDisplayTime`；没有 session 时回退当前显示。
 
 - [ ] **步骤 7：验证**
 
@@ -900,15 +1045,16 @@ SCContext.recordingSession?.appendExternalMic(sampleBuffer)
 ```bash
 rtk swift test
 rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
-rtk rg -n "SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|CMTime\\(value: 1, timescale: 0\\)|asSampleBuffer!|DispatchGroup\\(\\).*wait|\\.append\\(" QuickRecorder
+rtk rg -n "SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|CMTime\\(value: 1, timescale: 0\\)|asSampleBuffer!|DispatchGroup\\(\\).*wait" QuickRecorder
+rtk rg -n "AVAssetWriterInput\\.append|\\.markAsFinished\\(\\)|\\.finishWriting\\(|\\.endSession\\(" QuickRecorder -g "*.swift"
 ```
 
 预期：
 
 - Tests pass.
 - Build succeeds.
-- rg 不出现旧状态、非法 CMTime、强制解包。
-- `.append(` 匹配只允许出现在 `RecordingWriter.swift` 和非 writer 语义的数组操作中；任何 `AVAssetWriterInput.append` 在其他文件出现都必须修复。
+- 第一条 rg 无输出。
+- 第二条 rg 只允许命中 `QuickRecorder/RecordingCore/RecordingWriter.swift`。
 
 - [ ] **步骤 8：Commit**
 
@@ -917,18 +1063,18 @@ git add QuickRecorder/SCContext.swift QuickRecorder/RecordEngine.swift QuickReco
 git commit -m "refactor: route recording through single session"
 ```
 
-## 任务 9：完整后处理和问题记录更新
+## 任务 11：问题记录和后处理收口
 
 **文件：**
 - 修改：`QuickRecorder/SCContext.swift`
 - 修改：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
 - 修改：`docs/recording-issues.md`
 
-- [ ] **步骤 1：替换旧 remux 调用**
+- [ ] **步骤 1：确认旧 remux 调用已删除**
 
 All remux calls must go through `RecordingFinalizer` and pass `finalDuration`.
 
-- [ ] **步骤 2：替换纯音频 qma 流程**
+- [ ] **步骤 2：确认纯音频 qma 流程已由 finalizer 管理**
 
 Pure audio qma export must be triggered only by finalizer completion. Remove any remaining direct `vW.finishWriting {}` branch.
 
@@ -953,7 +1099,7 @@ After manual verification, update verified items to:
 ```bash
 rtk swift test
 rtk xcodebuild -project QuickRecorder.xcodeproj -scheme QuickRecorder -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
-rtk rg -n "vW\\.finishWriting|asset\\.duration\\)|SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|asSampleBuffer!|CMTime\\(value: 1, timescale: 0\\)" QuickRecorder
+rtk rg -n "vW\\.finishWriting|asset\\.duration\\)|SCContext\\.(vW|vwInput|awInput|micInput|lastPTS|timeOffset|isResume)|asSampleBuffer!|CMTime\\(value: 1, timescale: 0\\)|remuxRequiresAppIntegration|audioPackageRequiresAppIntegration" QuickRecorder
 ```
 
 预期：测试和构建成功，rg 无输出。
@@ -965,7 +1111,7 @@ git add QuickRecorder/SCContext.swift QuickRecorder/RecordingCore/RecordingFinal
 git commit -m "fix: finalize recordings through recording core"
 ```
 
-## 任务 10：最终人工回归
+## 任务 12：最终人工回归
 
 **文件：**
 - 修改：`docs/recording-issues.md`
