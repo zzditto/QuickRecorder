@@ -22,6 +22,7 @@ final class RecordingWriterOrderTests: XCTestCase {
         adapter.drainQueue()
 
         XCTAssertEqual(adapter.events, [
+            "startWriting",
             "startSession:0.0",
             "appendVideo",
             "endSession:12.0",

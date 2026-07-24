@@ -28,42 +28,37 @@ final class RecordingWriterStateTests: XCTestCase {
     }
 
     func testAssetWriterInputsExpectRealtimeMediaData() throws {
-        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("RecordingWriterStateTests-\(UUID().uuidString).mov")
-        defer { try? FileManager.default.removeItem(at: outputURL) }
-
-        let adapter = try AVAssetWriterAdapter(
-            configuration: RecordingWriterConfiguration(
-                outputURL: outputURL,
-                fileType: .mov,
-                videoOutputSettings: [
-                    AVVideoCodecKey: AVVideoCodecType.h264,
-                    AVVideoWidthKey: 1920,
-                    AVVideoHeightKey: 1080
-                ],
-                systemAudioOutputSettings: [
-                    AVFormatIDKey: kAudioFormatMPEG4AAC,
-                    AVSampleRateKey: 48_000,
-                    AVNumberOfChannelsKey: 2,
-                    AVEncoderBitRateKey: 128_000
-                ],
-                micOutputSettings: [
-                    AVFormatIDKey: kAudioFormatMPEG4AAC,
-                    AVSampleRateKey: 48_000,
-                    AVNumberOfChannelsKey: 1,
-                    AVEncoderBitRateKey: 64_000
-                ]
-            )
+        try assertAssetWriterInputExpectsRealtimeMediaData(
+            named: "video",
+            mediaType: .video,
+            videoOutputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: 1920,
+                AVVideoHeightKey: 1080
+            ]
         )
-
-        for inputName in ["videoInput", "systemAudioInput", "micInput"] {
-            let input = try XCTUnwrap(
-                Mirror(reflecting: adapter).children.first(where: { $0.label == inputName })?.value as? AVAssetWriterInput,
-                "Expected \(inputName) to be configured"
-            )
-            XCTAssertTrue(input.expectsMediaDataInRealTime, "Expected \(inputName) to expect real-time media data")
-        }
+        try assertAssetWriterInputExpectsRealtimeMediaData(
+            named: "system audio",
+            mediaType: .audio,
+            systemAudioOutputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 128_000
+            ]
+        )
+        try assertAssetWriterInputExpectsRealtimeMediaData(
+            named: "microphone audio",
+            mediaType: .audio,
+            micOutputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 64_000
+            ]
+        )
     }
+
 
     func testFinishWithoutSamplesStartsSessionBeforeEndingWriter() throws {
         let adapter = RecordingWriterTestAdapter()
@@ -80,6 +75,7 @@ final class RecordingWriterStateTests: XCTestCase {
 
         wait(for: [completion], timeout: 1)
         XCTAssertEqual(adapter.events, [
+            "startWriting",
             "startSession:0.0",
             "endSession:0.0",
             "markVideoFinished",
@@ -147,6 +143,33 @@ final class RecordingWriterStateTests: XCTestCase {
         }
 
         wait(for: [firstCompletion, secondCompletion], timeout: 1)
+    }
+
+    private func assertAssetWriterInputExpectsRealtimeMediaData(
+        named name: String,
+        mediaType: AVMediaType,
+        videoOutputSettings: [String: Any]? = nil,
+        systemAudioOutputSettings: [String: Any]? = nil,
+        micOutputSettings: [String: Any]? = nil
+    ) throws {
+        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("RecordingWriterStateTests-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let configuration = RecordingWriterConfiguration(
+            outputURL: outputURL,
+            fileType: .mov,
+            videoOutputSettings: videoOutputSettings,
+            systemAudioOutputSettings: systemAudioOutputSettings,
+            micOutputSettings: micOutputSettings
+        )
+        let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        _ = AVAssetWriterAdapter(writer: assetWriter, configuration: configuration)
+
+        XCTAssertEqual(assetWriter.inputs.count, 1, "Expected one \(name) input")
+        let input = try XCTUnwrap(assetWriter.inputs.first, "Expected \(name) input")
+        XCTAssertEqual(input.mediaType, mediaType, "Expected \(name) media type")
+        XCTAssertTrue(input.expectsMediaDataInRealTime, "Expected \(name) input to expect real-time media data")
     }
 
     private func makeSampleBuffer() throws -> CMSampleBuffer {
