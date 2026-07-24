@@ -62,6 +62,70 @@ final class ScreenCaptureContentRefreshPolicyTests: XCTestCase {
         coordinator.invalidateCurrentSession()
 
         XCTAssertFalse(coordinator.isCurrent(session))
+        XCTAssertFalse(
+            coordinator.canHandleMouseEvent(session, listenerSession: session)
+        )
+    }
+
+    func testQueuedMouseEventFromOldSessionIsRejectedAfterNewSessionStarts() {
+        let coordinator = ScreenCaptureSelectionSessionCoordinator()
+        let oldSession = coordinator.beginSession()
+
+        let newSession = coordinator.beginSession()
+
+        XCTAssertFalse(
+            coordinator.canHandleMouseEvent(oldSession, listenerSession: oldSession)
+        )
+        XCTAssertFalse(
+            coordinator.canHandleMouseEvent(newSession, listenerSession: oldSession)
+        )
+        XCTAssertTrue(
+            coordinator.canHandleMouseEvent(newSession, listenerSession: newSession)
+        )
+    }
+
+    func testStoppingListenerRejectsQueuedMouseEvent() {
+        let coordinator = ScreenCaptureSelectionSessionCoordinator()
+        let session = coordinator.beginSession()
+
+        coordinator.stopListening()
+
+        XCTAssertFalse(
+            coordinator.canHandleMouseEvent(session, listenerSession: session)
+        )
+    }
+
+    func testNewSessionCanShowMaskForSameWindowID() {
+        let coordinator = ScreenCaptureSelectionSessionCoordinator()
+        let oldSession = coordinator.beginSession()
+
+        XCTAssertTrue(
+            coordinator.selectTargetWindow(42, for: oldSession, listenerSession: oldSession)
+        )
+
+        let newSession = coordinator.beginSession()
+
+        XCTAssertNil(coordinator.targetWindowID)
+        XCTAssertTrue(
+            coordinator.selectTargetWindow(42, for: newSession, listenerSession: newSession)
+        )
+    }
+
+    func testOldSessionCompletionAndCloseCannotAffectNewSession() {
+        let coordinator = ScreenCaptureSelectionSessionCoordinator()
+        let oldSession = coordinator.beginSession()
+        XCTAssertTrue(
+            coordinator.selectTargetWindow(11, for: oldSession, listenerSession: oldSession)
+        )
+
+        let newSession = coordinator.beginSession()
+        XCTAssertTrue(
+            coordinator.selectTargetWindow(42, for: newSession, listenerSession: newSession)
+        )
+        XCTAssertFalse(coordinator.canApplySelectionCompletion(for: oldSession))
+        XCTAssertFalse(coordinator.clearTargetWindowID(for: oldSession))
+        XCTAssertFalse(coordinator.invalidateSession(oldSession))
+        XCTAssertEqual(coordinator.targetWindowID, 42)
     }
 
     func testPermissionPromptGateRejectsConcurrentPromptUntilReleased() {

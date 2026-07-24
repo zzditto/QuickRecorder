@@ -47,8 +47,17 @@ public final class ScreenCaptureSelectionSessionCoordinator {
 
     private let lock = NSLock()
     private var currentSession: UInt64 = 0
+    private var listenerSession: UInt64?
+    private var storedTargetWindowID: Int?
 
     public init() {}
+
+    public var targetWindowID: Int? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return storedTargetWindowID
+    }
 
     @discardableResult
     public func beginSession() -> UInt64 {
@@ -56,7 +65,17 @@ public final class ScreenCaptureSelectionSessionCoordinator {
         defer { lock.unlock() }
 
         currentSession &+= 1
+        listenerSession = currentSession
+        storedTargetWindowID = nil
         return currentSession
+    }
+
+    public func stopListening() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        listenerSession = nil
+        storedTargetWindowID = nil
     }
 
     public func invalidateCurrentSession() {
@@ -64,6 +83,28 @@ public final class ScreenCaptureSelectionSessionCoordinator {
         defer { lock.unlock() }
 
         currentSession &+= 1
+        listenerSession = nil
+        storedTargetWindowID = nil
+    }
+
+    @discardableResult
+    public func invalidateSession(_ session: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard session == currentSession else { return false }
+
+        currentSession &+= 1
+        listenerSession = nil
+        storedTargetWindowID = nil
+        return true
+    }
+
+    public func currentSessionToken() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return currentSession
     }
 
     public func isCurrent(_ session: UInt64) -> Bool {
@@ -71,6 +112,48 @@ public final class ScreenCaptureSelectionSessionCoordinator {
         defer { lock.unlock() }
 
         return session == currentSession
+    }
+
+    public func canHandleMouseEvent(_ eventSession: UInt64, listenerSession: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return eventSession == currentSession
+            && listenerSession == currentSession
+            && self.listenerSession == listenerSession
+    }
+
+    public func canApplySelectionCompletion(for session: UInt64) -> Bool {
+        isCurrent(session)
+    }
+
+    @discardableResult
+    public func selectTargetWindow(
+        _ windowID: Int,
+        for eventSession: UInt64,
+        listenerSession: UInt64
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard eventSession == currentSession,
+              listenerSession == currentSession,
+              self.listenerSession == listenerSession else {
+            return false
+        }
+
+        storedTargetWindowID = windowID
+        return true
+    }
+
+    @discardableResult
+    public func clearTargetWindowID(for session: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard session == currentSession else { return false }
+        storedTargetWindowID = nil
+        return true
     }
 }
 
