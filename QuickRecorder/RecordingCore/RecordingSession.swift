@@ -35,9 +35,11 @@ public final class RecordingSession {
     private var displayStartSourceTime: CMTime?
     private var displayPauseStartSourceTime: CMTime?
     private var displayAccumulatedPauseDuration: CMTime = .zero
+    private var displayStopSourceTime: CMTime?
     private var lastVideoSample: CMSampleBuffer?
     private var lastVideoPresentationTime: CMTime?
     private var aecClock: AECAudioClock?
+    private var aecSegmentStartSourceTime: CMTime?
     private var rejectedSamples = 0
 
     public init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing) {
@@ -107,6 +109,7 @@ public final class RecordingSession {
             }
             state = .recording
             displayStartSourceTime = sourceClock.currentSourceTime()
+            displayStopSourceTime = nil
         }
     }
 
@@ -142,8 +145,11 @@ public final class RecordingSession {
             if self.aecClock == nil {
                 self.aecClock = AECAudioClock(
                     sampleRate: buffer.format.sampleRate,
-                    startTime: self.timeline.sourceStartTime ?? self.sourceClock.currentSourceTime()
+                    startTime: self.aecSegmentStartSourceTime
+                        ?? self.timeline.sourceStartTime
+                        ?? self.sourceClock.currentSourceTime()
                 )
+                self.aecSegmentStartSourceTime = nil
             }
             guard var aecClock = self.aecClock else { return self.rejectSample() }
             let sourceTime = aecClock.nextSourceTime(frameLength: buffer.frameLength)
@@ -216,12 +222,14 @@ public final class RecordingSession {
             )
             self.displayPauseStartSourceTime = nil
         }
+        aecClock = nil
+        aecSegmentStartSourceTime = sourceTime
         state = .recording
     }
 
     private func displayElapsedTime(at sourceTime: CMTime) -> CMTime {
         guard let displayStartSourceTime else { return .zero }
-        let endTime = displayPauseStartSourceTime ?? sourceTime
+        let endTime = displayStopSourceTime ?? displayPauseStartSourceTime ?? sourceTime
         let elapsed = CMTimeSubtract(endTime, displayStartSourceTime)
         return CMTimeMaximum(.zero, CMTimeSubtract(elapsed, displayAccumulatedPauseDuration))
     }
@@ -237,6 +245,7 @@ public final class RecordingSession {
         if state == .paused {
             resumeLocked(at: sourceTime)
         }
+        displayStopSourceTime = sourceTime
         state = .stopping
         let finalDuration = timeline.finalDuration(at: sourceTime)
         let tailVideoSample = tailVideoSample(at: finalDuration)
