@@ -188,7 +188,7 @@ class ScreenSelectorViewModel: NSObject, ObservableObject, SCStreamDelegate, SCS
     }
 
     func setupStreams() {
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .automatic) { status in
             guard status == .available else { return }
             Task {
                 do {

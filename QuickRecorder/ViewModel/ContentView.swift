@@ -166,7 +166,7 @@ struct ContentView: View {
                     Divider().frame(height: 70)
                     Button(action: {
                         closeMainWindow()
-                        SCContext.updateAvailableContent { status in
+                        SCContext.updateAvailableContent(request: .userInitiated) { status in
                             guard status == .available else { return }
                             DispatchQueue.main.async {
                                 appDelegate.showAreaSelector(size: NSSize(width: 600, height: 450))

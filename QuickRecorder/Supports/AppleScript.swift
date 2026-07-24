@@ -15,7 +15,7 @@ class selectScreen: NSScriptCommand {
             createAlert(title: "Error".local, message: "Already recording!".local, button1: "OK".local).runModal()
             return nil
         }
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .userInitiated) { status in
             guard status == .available else { return }
             DispatchQueue.main.async {
                 closeAllWindow()
@@ -48,7 +48,7 @@ class selectArea: NSScriptCommand {
             createAlert(title: "Error".local, message: "Already recording!".local, button1: "OK".local).runModal()
             return nil
         }
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .userInitiated) { status in
             guard status == .available else { return }
             DispatchQueue.main.async {
                 closeAllWindow()
@@ -76,7 +76,7 @@ class selectApps: NSScriptCommand {
             createAlert(title: "Error".local, message: "Already recording!".local, button1: "OK".local).runModal()
             return nil
         }
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .userInitiated) { status in
             guard status == .available else { return }
             DispatchQueue.main.async {
                 closeAllWindow()
@@ -128,7 +128,7 @@ class selectWindows: NSScriptCommand {
             createAlert(title: "Error".local, message: "Already recording!".local, button1: "OK".local).runModal()
             return nil
         }
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .userInitiated) { status in
             guard status == .available else { return }
             DispatchQueue.main.async {
                 closeAllWindow()
@@ -187,7 +187,7 @@ class recordAudio: NSScriptCommand {
             createAlert(title: "Error".local, message: "Already recording!".local, button1: "OK".local).runModal()
             return nil
         }
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .userInitiated) { status in
             guard status == .available else { return }
             DispatchQueue.main.async {
                 let m = UserDefaults.standard.bool(forKey: "recordMic")

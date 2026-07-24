@@ -178,7 +178,7 @@ class AppSelectorViewModel: ObservableObject {
     }
     
     func updateAppList() {
-        SCContext.updateAvailableContent { status in
+        SCContext.updateAvailableContent(request: .automatic) { status in
             guard status == .available else { return }
             guard let screens = SCContext.availableContent?.displays else { return }
             for screen in screens {
@@ -193,7 +193,7 @@ class AppSelectorViewModel: ObservableObject {
     }
     
     /*func updateAppList() {
-        SCContext.updateAvailableContent{
+        SCContext.updateAvailableContent(request: .automatic) {
             DispatchQueue.main.async {
                 self.allApps = SCContext.getApps().filter({ $0.bundleIdentifier != Bundle.main.bundleIdentifier })
             }

@@ -44,22 +44,6 @@ class SCContext {
     static let excludedApps = ["", "com.apple.dock", "com.apple.screencaptureui", "com.apple.controlcenter", "com.apple.notificationcenterui", "com.apple.systemuiserver", "com.apple.WindowManager", "dev.mnpn.Azayaka", "com.gaosun.eul", "com.pointum.hazeover", "net.matthewpalmer.Vanilla", "com.dwarvesv.minimalbar", "com.bjango.istatmenus.status"]
     private static let permissionPromptGate = ScreenCapturePermissionPromptGate()
     
-    static func updateAvailableContentSync() -> SCShareableContent? {
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: SCShareableContent?
-
-        fetchAvailableContent(onScreenWindowsOnly: true) { content, _ in
-            result = content
-            semaphore.signal()
-        }
-
-        guard semaphore.wait(timeout: .now() + 5) == .success else {
-            print("Timed out while fetching available screen capture content".local)
-            return nil
-        }
-        return result
-    }
-
     private static func fetchAvailableContent(
         onScreenWindowsOnly: Bool,
         completion: @escaping (SCShareableContent?, ScreenCaptureContentStatus) -> Void
@@ -85,9 +69,12 @@ class SCContext {
         }
     }
 
-    static func updateAvailableContent(completion: @escaping (ScreenCaptureContentStatus) -> Void) {
-        fetchAvailableContent(onScreenWindowsOnly: false) { _, status in
-            let decision = ScreenCaptureContentRefreshPolicy.decision(for: status, origin: .userInitiated)
+    static func updateAvailableContent(
+        request: ScreenCaptureContentRefreshRequest,
+        completion: @escaping (ScreenCaptureContentStatus) -> Void
+    ) {
+        fetchAvailableContent(onScreenWindowsOnly: request.onScreenWindowsOnly) { _, status in
+            let decision = ScreenCaptureContentRefreshPolicy.decision(for: status, origin: request.origin)
             if case .showPermissionGuide = decision {
                 requestPermissions()
             }

@@ -27,6 +27,7 @@ struct HighlightMask: View {
     @State private var disableFilter = false
     @State private var donotCapture = false
     @State private var autoStop = 0
+    @State private var isResolvingSelection = false
     
     var body: some View {
         color
@@ -94,16 +95,27 @@ struct HighlightMask: View {
                 }
             }
             .onPressGesture {
-                if let w = WindowHighlighter.shared.getSCWindowWithID(UInt32(windowID)),
-                   let d = SCContext.getSCDisplayWithMouse() {
-                    display = d
-                    window = w
-                    WindowHighlighter.shared.stopMouseMonitor()
-                    showSheet = true
-                    return
+                guard !isResolvingSelection else { return }
+                isResolvingSelection = true
+
+                WindowHighlighter.shared.getSCWindowWithID(UInt32(windowID)) { selectedWindow, status in
+                    DispatchQueue.main.async {
+                        guard status == .available,
+                              let selectedWindow,
+                              let selectedDisplay = SCContext.getSCDisplayWithMouse() else {
+                            WindowHighlighter.shared.stopMouseMonitor()
+                            isResolvingSelection = false
+                            color = .red
+                            withAnimation(.easeInOut(duration: 0.6)) { color = .blue }
+                            return
+                        }
+
+                        display = selectedDisplay
+                        window = selectedWindow
+                        WindowHighlighter.shared.stopMouseMonitor()
+                        showSheet = true
+                    }
                 }
-                color = .red
-                withAnimation(.easeInOut(duration: 0.6)) { color = .blue }
             }
     }
     
@@ -269,11 +281,19 @@ class WindowHighlighter {
         return windowList
     }
     
-    func getSCWindowWithID(_ windowID: UInt32?) -> SCWindow? {
-        guard let windowID else { return nil }
-        guard SCContext.updateAvailableContentSync() != nil else { return nil }
-        let windows = SCContext.getWindows()
-        return windows.first(where: { $0.windowID == windowID })
+    func getSCWindowWithID(
+        _ windowID: UInt32,
+        completion: @escaping (SCWindow?, ScreenCaptureContentStatus) -> Void
+    ) {
+        SCContext.updateAvailableContent(request: .windowSelection) { status in
+            guard status == .available else {
+                completion(nil, status)
+                return
+            }
+
+            let windows = SCContext.getWindows()
+            completion(windows.first(where: { $0.windowID == windowID }), .available)
+        }
     }
     
     func getCGWindowFrame(window: [String: Any]) -> CGRect? {

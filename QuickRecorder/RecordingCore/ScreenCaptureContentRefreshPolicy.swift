@@ -11,6 +11,20 @@ public enum ScreenCaptureContentRequestOrigin: Equatable {
     case userInitiated
 }
 
+public struct ScreenCaptureContentRefreshRequest: Equatable {
+    public let origin: ScreenCaptureContentRequestOrigin
+    public let onScreenWindowsOnly: Bool
+
+    public init(origin: ScreenCaptureContentRequestOrigin, onScreenWindowsOnly: Bool) {
+        self.origin = origin
+        self.onScreenWindowsOnly = onScreenWindowsOnly
+    }
+
+    public static let automatic = Self(origin: .automatic, onScreenWindowsOnly: false)
+    public static let userInitiated = Self(origin: .userInitiated, onScreenWindowsOnly: false)
+    public static let windowSelection = Self(origin: .userInitiated, onScreenWindowsOnly: true)
+}
+
 public enum ScreenCaptureContentRefreshDecision: Equatable {
     case complete(status: ScreenCaptureContentStatus)
     case showPermissionGuide(status: ScreenCaptureContentStatus)
