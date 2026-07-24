@@ -55,6 +55,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		18RC00012F00000100000001 /* RecordingTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTimeline.swift; sourceTree = "<group>"; };
+		18RC00022F00000100000002 /* SampleRetiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleRetiming.swift; sourceTree = "<group>"; };
+		18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleBufferFactory.swift; sourceTree = "<group>"; };
+		18RC00042F00000100000004 /* AECAudioClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AECAudioClock.swift; sourceTree = "<group>"; };
+		18RC00052F00000100000005 /* RecordingWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingWriter.swift; sourceTree = "<group>"; };
+		18RC00062F00000100000006 /* RecordingFinalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizer.swift; sourceTree = "<group>"; };
+		18RC00072F00000100000007 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
 		1821F2E72CF4B226004A2EC0 /* ContentViewNew.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewNew.swift; sourceTree = "<group>"; };
 		184CAEC62BDCCC2300D61D57 /* AVContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVContext.swift; sourceTree = "<group>"; };
 		184CAEC82BDDEC6800D61D57 /* AppBlockSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBlockSelector.swift; sourceTree = "<group>"; };

@@ -136,8 +136,9 @@ struct StatusBarItem: View {
                     CameraPopoverView(closePopover: { popoverState.isShowing = false })
                 }
                 .onReceive(updateTimer) { t in
-                    recordingLength = SCContext.getRecordingLength()
-                    let timePassed = Date.now.timeIntervalSince(SCContext.startTime ?? t)
+                    let elapsedDisplayTime = SCContext.recordingSession?.elapsedDisplayTime
+                    recordingLength = SCContext.getRecordingLength(elapsedDisplayTime)
+                    let timePassed = elapsedDisplayTime ?? Date.now.timeIntervalSince(SCContext.startTime ?? t)
                     if SCContext.autoStop != 0 && timePassed / 60 >= CGFloat(SCContext.autoStop) { SCContext.stopRecording() }
                     if let visible = statusBarItem.button?.window?.occlusionState.contains(.visible) {
                         if visible { NSApp.windows.first(where: { $0.title == "Recording Controller".local })?.close(); return }
