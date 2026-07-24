@@ -64,6 +64,15 @@ struct RecordingWriterStateMachine {
         return false
     }
 
+    var canCancel: Bool {
+        switch state {
+        case .acceptingSamples, .stopping:
+            return true
+        case .idle, .finished:
+            return false
+        }
+    }
+
     mutating func beginStopping() {
         guard acceptsSamples else { return }
         state = .stopping
@@ -75,6 +84,11 @@ struct RecordingWriterStateMachine {
     }
 
     mutating func finish() {
+        state = .finished
+    }
+
+    mutating func cancel() {
+        guard canCancel else { return }
         state = .finished
     }
 }
@@ -93,6 +107,7 @@ protocol RecordingWriterAdapting: AnyObject {
     func markSystemAudioFinished()
     func markMicFinished()
     func finishWriting(completion: @escaping (Error?) -> Void)
+    func cancelWriting()
 }
 
 final class AVAssetWriterAdapter: RecordingWriterAdapting {
@@ -154,6 +169,10 @@ final class AVAssetWriterAdapter: RecordingWriterAdapting {
         writer.finishWriting {
             completion(self.writer.error)
         }
+    }
+
+    func cancelWriting() {
+        writer.cancelWriting()
     }
 
     private static func makeInput(
@@ -274,6 +293,14 @@ public final class RecordingWriter {
         }
     }
 
+    func cancel() {
+        writerQueue.sync {
+            guard state.canCancel else { return }
+            state.cancel()
+            adapter.cancelWriting()
+        }
+    }
+
     private func startSessionIfNeeded() {
         guard !hasStartedSession else { return }
         adapter.startSession(at: .zero)
@@ -344,6 +371,10 @@ final class RecordingWriterTestAdapter: RecordingWriterAdapting {
     func finishWriting(completion: @escaping (Error?) -> Void) {
         record("finishWriting")
         completion(nil)
+    }
+
+    func cancelWriting() {
+        record("cancelWriting")
     }
 
     func drainQueue() {

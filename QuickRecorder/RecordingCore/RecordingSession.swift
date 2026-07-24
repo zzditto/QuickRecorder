@@ -126,9 +126,14 @@ public final class RecordingSession {
             guard !writers.isEmpty else {
                 throw RecordingSessionError.writerCreationFailed(RecordingSessionError.writerUnavailable)
             }
+            var startedWriters: [RecordingWriter] = []
             do {
-                try writers.forEach { try $0.start() }
+                for writer in writers {
+                    try writer.start()
+                    startedWriters.append(writer)
+                }
             } catch {
+                startedWriters.forEach { $0.cancel() }
                 throw RecordingSessionError.writerStartFailed(error)
             }
             state = .recording

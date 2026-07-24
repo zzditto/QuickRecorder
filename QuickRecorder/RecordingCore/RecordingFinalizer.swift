@@ -26,20 +26,26 @@ public struct RecordingQMAPackageInfo: Codable, Equatable {
 
 public struct RecordingQMAPackageOutput: Equatable {
     public let packageURL: URL
-    public let systemAudioURL: URL
-    public let microphoneAudioURL: URL
     public let info: RecordingQMAPackageInfo
 
-    public init(
-        packageURL: URL,
-        systemAudioURL: URL,
-        microphoneAudioURL: URL,
-        info: RecordingQMAPackageInfo
-    ) {
+    public init?(packageURL: URL, info: RecordingQMAPackageInfo) {
+        guard Self.isSafeFileExtension(info.format) else {
+            return nil
+        }
         self.packageURL = packageURL
-        self.systemAudioURL = systemAudioURL
-        self.microphoneAudioURL = microphoneAudioURL
         self.info = info
+    }
+
+    public var systemAudioURL: URL {
+        packageURL.appendingPathComponent("sys.\(info.format)")
+    }
+
+    public var microphoneAudioURL: URL {
+        packageURL.appendingPathComponent("mic.\(info.format)")
+    }
+
+    private static func isSafeFileExtension(_ format: String) -> Bool {
+        !format.isEmpty && !format.contains("/") && !format.contains("\\")
     }
 }
 

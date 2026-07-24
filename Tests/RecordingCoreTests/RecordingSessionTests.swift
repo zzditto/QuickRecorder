@@ -40,8 +40,18 @@ final class RecordingSessionTests: XCTestCase {
 
     func testQMAFinalizerWaitsForBothAudioWritersToFinish() throws {
         let packageURL = URL(fileURLWithPath: "/tmp/session.qma")
-        let systemAudioURL = packageURL.appendingPathComponent("sys.m4a")
-        let microphoneAudioURL = packageURL.appendingPathComponent("mic.m4a")
+        let info = RecordingQMAPackageInfo(
+            format: "m4a",
+            encoder: "aac",
+            exportMP3: false,
+            sysVol: 1,
+            micVol: 1
+        )
+        let packageOutput = try XCTUnwrap(
+            RecordingQMAPackageOutput(packageURL: packageURL, info: info)
+        )
+        let systemAudioURL = packageOutput.systemAudioURL
+        let microphoneAudioURL = packageOutput.microphoneAudioURL
         let configuration = RecordingSessionConfiguration(
             writers: .qma(
                 systemAudio: RecordingWriterConfiguration(
@@ -56,18 +66,7 @@ final class RecordingSessionTests: XCTestCase {
                 )
             ),
             output: .qmaPackage(
-                RecordingQMAPackageOutput(
-                    packageURL: packageURL,
-                    systemAudioURL: systemAudioURL,
-                    microphoneAudioURL: microphoneAudioURL,
-                    info: RecordingQMAPackageInfo(
-                        format: "m4a",
-                        encoder: "aac",
-                        exportMP3: false,
-                        sysVol: 1,
-                        micVol: 1
-                    )
-                )
+                packageOutput
             )
         )
         let systemAdapter = HoldingFinishRecordingWriterAdapter()
@@ -79,12 +78,14 @@ final class RecordingSessionTests: XCTestCase {
         let finalizer = RecordingFinalizerSpy()
         let finalizing = expectation(description: "finalizer invoked")
         finalizer.onFinalize = { finalizing.fulfill() }
+        let systemWriter = RecordingWriter(adapter: systemAdapter)
+        let microphoneWriter = RecordingWriter(adapter: microphoneAdapter)
         let session = RecordingSession(
             configuration: configuration,
             finalizer: finalizer,
             writers: [
-                RecordingWriter(adapter: systemAdapter),
-                RecordingWriter(adapter: microphoneAdapter)
+                systemWriter,
+                microphoneWriter
             ]
         )
         try session.start()
@@ -94,6 +95,16 @@ final class RecordingSessionTests: XCTestCase {
         XCTAssertTrue(finalizer.requests.isEmpty)
 
         systemAdapter.complete()
+        let firstWriterCompletionDelivered = expectation(description: "first writer completion delivered")
+        systemWriter.finish(finalDuration: .zero, tailVideoSample: nil) { result in
+            guard case .failure = result else {
+                return XCTFail("Expected second finish to fail")
+            }
+            firstWriterCompletionDelivered.fulfill()
+        }
+        wait(for: [firstWriterCompletionDelivered], timeout: 1)
+        // The synchronous accessor drains the session queue after the first completion is enqueued.
+        _ = session.rejectedSampleCount
         XCTAssertTrue(finalizer.requests.isEmpty)
         microphoneAdapter.complete()
 
@@ -102,6 +113,63 @@ final class RecordingSessionTests: XCTestCase {
         guard case .qmaPackage = finalizer.requests[0].output else {
             return XCTFail("Expected QMA finalizer request")
         }
+    }
+
+    func testStartCancelsStartedWriterWhenLaterWriterFails() throws {
+        let packageURL = URL(fileURLWithPath: "/tmp/start-failure.qma")
+        let packageOutput = try XCTUnwrap(
+            RecordingQMAPackageOutput(
+                packageURL: packageURL,
+                info: RecordingQMAPackageInfo(
+                    format: "m4a",
+                    encoder: "aac",
+                    exportMP3: false,
+                    sysVol: 1,
+                    micVol: 1
+                )
+            )
+        )
+        let configuration = RecordingSessionConfiguration(
+            writers: .qma(
+                systemAudio: RecordingWriterConfiguration(
+                    outputURL: packageOutput.systemAudioURL,
+                    fileType: .m4a,
+                    systemAudioOutputSettings: [:]
+                ),
+                microphoneAudio: RecordingWriterConfiguration(
+                    outputURL: packageOutput.microphoneAudioURL,
+                    fileType: .m4a,
+                    micOutputSettings: [:]
+                )
+            ),
+            output: .qmaPackage(packageOutput)
+        )
+        let startedAdapter = CancelTrackingRecordingWriterAdapter()
+        let startedWriter = RecordingWriter(adapter: startedAdapter)
+        let session = RecordingSession(
+            configuration: configuration,
+            finalizer: RecordingFinalizerSpy(),
+            writers: [
+                startedWriter,
+                RecordingWriter(adapter: FailingStartRecordingWriterAdapter())
+            ]
+        )
+
+        XCTAssertThrowsError(try session.start()) { error in
+            guard case RecordingSessionError.writerStartFailed = error else {
+                return XCTFail("Expected writer start failure, got \(error)")
+            }
+        }
+        XCTAssertEqual(startedAdapter.cancelWritingCallCount, 1)
+
+        let finish = expectation(description: "cancelled writer cannot finish again")
+        startedWriter.finish(finalDuration: .zero, tailVideoSample: nil) { result in
+            guard case .failure = result else {
+                return XCTFail("Expected cancelled writer to reject finish")
+            }
+            finish.fulfill()
+        }
+        wait(for: [finish], timeout: 1)
     }
 
     func testStopUsesFirstSampleAsTimelineStart() throws {
@@ -510,14 +578,39 @@ private final class CapturingRecordingWriterAdapter: RecordingWriterAdapting {
     func markSystemAudioFinished() {}
     func markMicFinished() {}
     func finishWriting(completion: @escaping (Error?) -> Void) { completion(nil) }
+    func cancelWriting() {}
 }
 
 private final class RecordingFinalizerSpy: RecordingFinalizing {
-    private(set) var requests: [RecordingFinalizerRequest] = []
-    var onFinalize: (() -> Void)?
+    private let lock = NSLock()
+    private var storedRequests: [RecordingFinalizerRequest] = []
+    private var storedOnFinalize: (() -> Void)?
+
+    var requests: [RecordingFinalizerRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequests
+    }
+
+    var onFinalize: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedOnFinalize
+        }
+        set {
+            lock.lock()
+            storedOnFinalize = newValue
+            lock.unlock()
+        }
+    }
 
     func finalize(_ request: RecordingFinalizerRequest, completion: @escaping (Result<RecordingOutput, Error>) -> Void) {
-        requests.append(request)
+        let onFinalize: (() -> Void)?
+        lock.lock()
+        storedRequests.append(request)
+        onFinalize = storedOnFinalize
+        lock.unlock()
         onFinalize?()
         completion(.success(RecordingOutput(url: request.output.finalURL, duration: request.finalDuration)))
     }
@@ -559,8 +652,41 @@ private final class FailingStartRecordingWriterAdapter: RecordingWriterAdapting 
     func markSystemAudioFinished() {}
     func markMicFinished() {}
     func finishWriting(completion: @escaping (Error?) -> Void) {}
+    func cancelWriting() {}
 
     private struct StartFailure: Error {}
+}
+
+private final class CancelTrackingRecordingWriterAdapter: RecordingWriterAdapting {
+    private let lock = NSLock()
+    private var storedCancelWritingCallCount = 0
+
+    var isReadyForVideo: Bool { false }
+    var isReadyForSystemAudio: Bool { true }
+    var isReadyForMic: Bool { false }
+
+    var cancelWritingCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCancelWritingCallCount
+    }
+
+    func startWriting() throws {}
+    func startSession(at time: CMTime) {}
+    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool { false }
+    func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
+    func appendMic(_ sampleBuffer: CMSampleBuffer) -> Bool { false }
+    func endSession(at time: CMTime) {}
+    func markVideoFinished() {}
+    func markSystemAudioFinished() {}
+    func markMicFinished() {}
+    func finishWriting(completion: @escaping (Error?) -> Void) { completion(nil) }
+
+    func cancelWriting() {
+        lock.lock()
+        storedCancelWritingCallCount += 1
+        lock.unlock()
+    }
 }
 
 private final class HoldingFinishRecordingWriterAdapter: RecordingWriterAdapting {
@@ -584,6 +710,8 @@ private final class HoldingFinishRecordingWriterAdapter: RecordingWriterAdapting
         self.completion = completion
         onFinishRequested?()
     }
+
+    func cancelWriting() {}
 
     func complete() {
         let completion = completion

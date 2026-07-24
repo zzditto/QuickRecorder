@@ -3,7 +3,7 @@ import XCTest
 @testable import RecordingCore
 
 final class RecordingFinalizerTests: XCTestCase {
-    func testOutputModesExposeTheirFinalDestinations() {
+    func testOutputModesExposeTheirFinalDestinations() throws {
         let directory = URL(fileURLWithPath: "/tmp")
         let directURL = directory.appendingPathComponent("direct.mov")
         let remuxURL = directory.appendingPathComponent("remux.mov")
@@ -17,10 +17,8 @@ final class RecordingFinalizerTests: XCTestCase {
             ),
             .pureAudio(outputURL: audioURL),
             .qmaPackage(
-                RecordingQMAPackageOutput(
+                try XCTUnwrap(RecordingQMAPackageOutput(
                     packageURL: packageURL,
-                    systemAudioURL: packageURL.appendingPathComponent("sys.m4a"),
-                    microphoneAudioURL: packageURL.appendingPathComponent("mic.m4a"),
                     info: RecordingQMAPackageInfo(
                         format: "m4a",
                         encoder: "aac",
@@ -28,7 +26,7 @@ final class RecordingFinalizerTests: XCTestCase {
                         sysVol: 1,
                         micVol: 1
                     )
-                )
+                ))
             )
         ]
 
@@ -54,10 +52,8 @@ final class RecordingFinalizerTests: XCTestCase {
         XCTAssertEqual(requestFinalURL, finalURL)
     }
 
-    func testQMAPackageOutputIncludesAudioURLsAndInfo() {
+    func testQMAPackageOutputDerivesAudioURLsInsidePackageFromInfoFormat() throws {
         let packageURL = URL(fileURLWithPath: "/tmp/quick-recorder.qma")
-        let systemAudioURL = packageURL.appendingPathComponent("sys.m4a")
-        let microphoneAudioURL = packageURL.appendingPathComponent("mic.m4a")
         let info = RecordingQMAPackageInfo(
             format: "m4a",
             encoder: "aac",
@@ -66,21 +62,34 @@ final class RecordingFinalizerTests: XCTestCase {
             micVol: 0.6
         )
         let output = RecordingSessionOutput.qmaPackage(
-            RecordingQMAPackageOutput(
+            try XCTUnwrap(RecordingQMAPackageOutput(
                 packageURL: packageURL,
-                systemAudioURL: systemAudioURL,
-                microphoneAudioURL: microphoneAudioURL,
                 info: info
-            )
+            ))
         )
 
         guard case let .qmaPackage(package) = output else {
             return XCTFail("Expected QMA package output")
         }
         XCTAssertEqual(package.packageURL, packageURL)
-        XCTAssertEqual(package.systemAudioURL, systemAudioURL)
-        XCTAssertEqual(package.microphoneAudioURL, microphoneAudioURL)
+        XCTAssertEqual(package.systemAudioURL, packageURL.appendingPathComponent("sys.m4a"))
+        XCTAssertEqual(package.microphoneAudioURL, packageURL.appendingPathComponent("mic.m4a"))
         XCTAssertEqual(package.info, info)
+    }
+
+    func testQMAPackageOutputRejectsUnsafeFormat() {
+        let package = RecordingQMAPackageOutput(
+            packageURL: URL(fileURLWithPath: "/tmp/quick-recorder.qma"),
+            info: RecordingQMAPackageInfo(
+                format: "m4a/external",
+                encoder: "aac",
+                exportMP3: false,
+                sysVol: 1,
+                micVol: 1
+            )
+        )
+
+        XCTAssertNil(package)
     }
 
     func testVideoRemuxUsesFinalDurationNotAssetDuration() {
@@ -188,10 +197,6 @@ final class RecordingFinalizerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let packageURL = directory.appendingPathComponent("recording.qma")
         try FileManager.default.createDirectory(at: packageURL, withIntermediateDirectories: true)
-        let systemAudioURL = packageURL.appendingPathComponent("sys.m4a")
-        let microphoneAudioURL = packageURL.appendingPathComponent("mic.m4a")
-        try Data("system".utf8).write(to: systemAudioURL)
-        try Data("microphone".utf8).write(to: microphoneAudioURL)
         let info = RecordingQMAPackageInfo(
             format: "m4a",
             encoder: "aac",
@@ -199,17 +204,17 @@ final class RecordingFinalizerTests: XCTestCase {
             sysVol: 1,
             micVol: 1
         )
+        let package = try XCTUnwrap(
+            RecordingQMAPackageOutput(packageURL: packageURL, info: info)
+        )
+        try Data("system".utf8).write(to: package.systemAudioURL)
+        try Data("microphone".utf8).write(to: package.microphoneAudioURL)
         let completion = expectation(description: "QMA finalized")
 
         RecordingFinalizer().finalize(
             RecordingFinalizerRequest(
                 output: .qmaPackage(
-                    RecordingQMAPackageOutput(
-                        packageURL: packageURL,
-                        systemAudioURL: systemAudioURL,
-                        microphoneAudioURL: microphoneAudioURL,
-                        info: info
-                    )
+                    package
                 ),
                 finalDuration: CMTime(seconds: 5, preferredTimescale: 600)
             )
@@ -231,26 +236,25 @@ final class RecordingFinalizerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let packageURL = directory.appendingPathComponent("recording.qma")
         try FileManager.default.createDirectory(at: packageURL, withIntermediateDirectories: true)
-        let systemAudioURL = packageURL.appendingPathComponent("sys.m4a")
-        let microphoneAudioURL = packageURL.appendingPathComponent("mic.m4a")
+        let info = RecordingQMAPackageInfo(
+            format: "m4a",
+            encoder: "aac",
+            exportMP3: false,
+            sysVol: 1,
+            micVol: 1
+        )
+        let package = try XCTUnwrap(
+            RecordingQMAPackageOutput(packageURL: packageURL, info: info)
+        )
+        let systemAudioURL = package.systemAudioURL
+        let microphoneAudioURL = package.microphoneAudioURL
         try Data("system".utf8).write(to: systemAudioURL)
         let completion = expectation(description: "QMA failure")
 
         RecordingFinalizer().finalize(
             RecordingFinalizerRequest(
                 output: .qmaPackage(
-                    RecordingQMAPackageOutput(
-                        packageURL: packageURL,
-                        systemAudioURL: systemAudioURL,
-                        microphoneAudioURL: microphoneAudioURL,
-                        info: RecordingQMAPackageInfo(
-                            format: "m4a",
-                            encoder: "aac",
-                            exportMP3: false,
-                            sysVol: 1,
-                            micVol: 1
-                        )
-                    )
+                    package
                 ),
                 finalDuration: CMTime(seconds: 5, preferredTimescale: 600)
             )
