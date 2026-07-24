@@ -27,6 +27,68 @@ final class RecordingWriterStateTests: XCTestCase {
         XCTAssertFalse(state.acceptsSamples)
     }
 
+    func testAssetWriterInputsExpectRealtimeMediaData() throws {
+        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("RecordingWriterStateTests-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let adapter = try AVAssetWriterAdapter(
+            configuration: RecordingWriterConfiguration(
+                outputURL: outputURL,
+                fileType: .mov,
+                videoOutputSettings: [
+                    AVVideoCodecKey: AVVideoCodecType.h264,
+                    AVVideoWidthKey: 1920,
+                    AVVideoHeightKey: 1080
+                ],
+                systemAudioOutputSettings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 2,
+                    AVEncoderBitRateKey: 128_000
+                ],
+                micOutputSettings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderBitRateKey: 64_000
+                ]
+            )
+        )
+
+        for inputName in ["videoInput", "systemAudioInput", "micInput"] {
+            let input = try XCTUnwrap(
+                Mirror(reflecting: adapter).children.first(where: { $0.label == inputName })?.value as? AVAssetWriterInput,
+                "Expected \(inputName) to be configured"
+            )
+            XCTAssertTrue(input.expectsMediaDataInRealTime, "Expected \(inputName) to expect real-time media data")
+        }
+    }
+
+    func testFinishWithoutSamplesStartsSessionBeforeEndingWriter() throws {
+        let adapter = RecordingWriterTestAdapter()
+        let writer = RecordingWriter(adapter: adapter)
+        let completion = expectation(description: "finish")
+
+        try writer.start()
+        writer.finish(finalDuration: .zero, tailVideoSample: nil) { result in
+            guard case .success = result else {
+                return XCTFail("Expected successful finish")
+            }
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+        XCTAssertEqual(adapter.events, [
+            "startSession:0.0",
+            "endSession:0.0",
+            "markVideoFinished",
+            "markSystemAudioFinished",
+            "markMicFinished",
+            "finishWriting"
+        ])
+    }
+
     func testAppendBeforeStartIsDroppedWithoutStartingSession() throws {
         let adapter = RecordingWriterTestAdapter()
         let writer = RecordingWriter(adapter: adapter)

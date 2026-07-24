@@ -182,6 +182,7 @@ final class AVAssetWriterAdapter: RecordingWriterAdapting {
     ) -> AVAssetWriterInput? {
         guard let settings else { return nil }
         let input = AVAssetWriterInput(mediaType: mediaType, outputSettings: settings)
+        input.expectsMediaDataInRealTime = true
         guard writer.canAdd(input) else { return nil }
         writer.add(input)
         return input
@@ -211,6 +212,8 @@ public final class RecordingWriter {
                 throw RecordingWriterError.invalidStart
             }
             try adapter.startWriting()
+            adapter.startSession(at: .zero)
+            hasStartedSession = true
             state.start()
         }
     }

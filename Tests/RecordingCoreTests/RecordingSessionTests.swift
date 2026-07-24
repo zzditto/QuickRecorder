@@ -89,6 +89,8 @@ final class RecordingSessionTests: XCTestCase {
             ]
         )
         try session.start()
+        XCTAssertEqual(systemAdapter.startedSessionTimes, [.zero])
+        XCTAssertEqual(microphoneAdapter.startedSessionTimes, [.zero])
 
         session.stop(at: CMTime(seconds: 3, preferredTimescale: 600)) { _ in }
         wait(for: [systemFinishRequested, microphoneFinishRequested], timeout: 1)
@@ -695,9 +697,13 @@ private final class HoldingFinishRecordingWriterAdapter: RecordingWriterAdapting
     var isReadyForMic: Bool { true }
     var onFinishRequested: (() -> Void)?
     private var completion: ((Error?) -> Void)?
+    private(set) var startedSessionTimes: [CMTime] = []
 
     func startWriting() throws {}
-    func startSession(at time: CMTime) {}
+
+    func startSession(at time: CMTime) {
+        startedSessionTimes.append(time)
+    }
     func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
     func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
     func appendMic(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
