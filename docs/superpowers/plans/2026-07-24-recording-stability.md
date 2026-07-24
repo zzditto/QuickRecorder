@@ -18,13 +18,15 @@
 - 创建：`QuickRecorder/RecordingCore/AudioSampleBufferFactory.swift`
 - 创建：`QuickRecorder/RecordingCore/AECAudioClock.swift`
 - 创建：`QuickRecorder/RecordingCore/RecordingWriter.swift`
-- 创建：`QuickRecorder/RecordingCore/RecordingSession.swift`
 - 创建：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
+- 创建：`QuickRecorder/RecordingCore/RecordingSession.swift`
 - 创建：`Tests/RecordingCoreTests/RecordingTimelineTests.swift`
 - 创建：`Tests/RecordingCoreTests/SampleRetimingTests.swift`
 - 创建：`Tests/RecordingCoreTests/AudioSampleBufferFactoryTests.swift`
 - 创建：`Tests/RecordingCoreTests/AECAudioClockTests.swift`
 - 创建：`Tests/RecordingCoreTests/RecordingWriterStateTests.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingWriterOrderTests.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingFinalizerTests.swift`
 - 创建：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
 - 修改：`QuickRecorder.xcodeproj/project.pbxproj`
 - 修改：`QuickRecorder/SCContext.swift`
@@ -507,88 +509,7 @@ git add QuickRecorder/RecordingCore/RecordingWriter.swift Tests/RecordingCoreTes
 git commit -m "feat: add recording writer"
 ```
 
-## 任务 5：实现完整 RecordingSession
-
-**文件：**
-- 创建：`QuickRecorder/RecordingCore/RecordingSession.swift`
-- 创建：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
-
-- [ ] **步骤 1：写 session 行为测试**
-
-```swift
-import CoreMedia
-import XCTest
-@testable import RecordingCore
-
-final class RecordingSessionTests: XCTestCase {
-    func testStopDurationIncludesTimeAfterLastFrame() {
-        var timeline = RecordingTimeline()
-        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
-        _ = timeline.presentationTime(for: CMTime(seconds: 20, preferredTimescale: 600))
-        XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 70, preferredTimescale: 600)).seconds, 60, accuracy: 0.001)
-    }
-
-    func testPauseResumeRemovesDuration() {
-        var timeline = RecordingTimeline()
-        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
-        timeline.pause(at: CMTime(seconds: 20, preferredTimescale: 600))
-        timeline.resume(at: CMTime(seconds: 35, preferredTimescale: 600))
-        XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 50, preferredTimescale: 600)).seconds, 25, accuracy: 0.001)
-    }
-}
-```
-
-- [ ] **步骤 2：验证测试**
-
-运行：`rtk swift test --filter RecordingSessionTests`
-
-预期：PASS once timeline exists; this locks behavior before integration.
-
-- [ ] **步骤 3：实现 session**
-
-`RecordingSession` must:
-
-- Own `sessionQueue`.
-- Own `RecordingTimeline`.
-- Own `RecordingWriter`.
-- Own last complete video sample and last video presentation time.
-- Own `AECAudioClock`.
-- Expose async `start`, `appendVideo`, `appendSystemAudio`, `appendDefaultMicBuffer`, `appendAECMicBuffer`, `appendExternalMic`, `pause`, `resume`, `stop`.
-- Ensure timeline and last-frame mutations only happen on `sessionQueue`.
-- Reject all sample appends after stopping.
-- Call finalizer after writer finish.
-
-Required public shape:
-
-```swift
-public final class RecordingSession {
-    public init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing)
-    public func start() throws
-    public func appendVideo(_ sampleBuffer: CMSampleBuffer)
-    public func appendSystemAudio(_ sampleBuffer: CMSampleBuffer)
-    public func appendDefaultMicBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime)
-    public func appendAECMicBuffer(_ buffer: AVAudioPCMBuffer)
-    public func appendExternalMic(_ sampleBuffer: CMSampleBuffer)
-    public func pause(at sourceTime: CMTime)
-    public func resume(at sourceTime: CMTime)
-    public func stop(at sourceTime: CMTime, completion: @escaping (Result<RecordingOutput, Error>) -> Void)
-}
-```
-
-- [ ] **步骤 4：验证**
-
-运行：`rtk swift test`
-
-预期：PASS.
-
-- [ ] **步骤 5：Commit**
-
-```bash
-git add QuickRecorder/RecordingCore/RecordingSession.swift Tests/RecordingCoreTests/RecordingSessionTests.swift
-git commit -m "feat: add recording session"
-```
-
-## 任务 6：实现完整 RecordingFinalizer
+## 任务 5：实现完整 RecordingFinalizer
 
 **文件：**
 - 创建：`QuickRecorder/RecordingCore/RecordingFinalizer.swift`
@@ -614,6 +535,29 @@ final class RecordingFinalizerTests: XCTestCase {
         XCTAssertFalse(policy.shouldDeleteIntermediateFiles(remuxSucceeded: false))
         XCTAssertTrue(policy.shouldDeleteIntermediateFiles(remuxSucceeded: true))
     }
+
+    func testVideoWithoutRemuxReturnsCompletedOutput() {
+        let finalizer = RecordingFinalizer()
+        let outputURL = URL(fileURLWithPath: "/tmp/quick-recorder-test.mov")
+        let request = RecordingFinalizerRequest(
+            sourceURL: outputURL,
+            outputURL: outputURL,
+            finalDuration: CMTime(seconds: 5, preferredTimescale: 600),
+            mode: .videoWithoutRemux
+        )
+        let completion = expectation(description: "finalized")
+
+        finalizer.finalize(request) { result in
+            guard case let .success(output) = result else {
+                return XCTFail("Expected successful output")
+            }
+            XCTAssertEqual(output.url, outputURL)
+            XCTAssertEqual(output.duration.seconds, 5, accuracy: 0.001)
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+    }
 }
 ```
 
@@ -621,7 +565,7 @@ final class RecordingFinalizerTests: XCTestCase {
 
 运行：`rtk swift test --filter RecordingFinalizerTests`
 
-预期：FAIL，缺少 `RecordingFinalizer` 或 `RecordingFinalizerFilePolicy`。
+预期：FAIL，缺少 `RecordingFinalizer`、`RecordingFinalizerRequest`、`RecordingOutput` 或 `RecordingFinalizerFilePolicy`。
 
 - [ ] **步骤 3：实现 finalizer 接口**
 
@@ -630,6 +574,24 @@ Required public shape:
 ```swift
 public protocol RecordingFinalizing {
     func finalize(_ request: RecordingFinalizerRequest, completion: @escaping (Result<RecordingOutput, Error>) -> Void)
+}
+
+public struct RecordingFinalizerRequest {
+    public let sourceURL: URL
+    public let outputURL: URL
+    public let finalDuration: CMTime
+    public let mode: RecordingFinalizerMode
+}
+
+public enum RecordingFinalizerMode {
+    case videoWithoutRemux
+    case videoWithRemux
+    case pureAudioPackage
+}
+
+public struct RecordingOutput {
+    public let url: URL
+    public let duration: CMTime
 }
 
 public struct RecordingFinalizer: RecordingFinalizing {
@@ -648,7 +610,7 @@ Implementation requirements:
 
 - For video without remux: return completed output after writer finish.
 - For video remux: use `finalDuration`, never `asset.duration` as the controlling duration.
-- For pure audio qma: wait for system audio close and mic writer finish before package load/export.
+- For pure audio qma: expose a mode and request shape that can wait for system audio close and mic writer finish when app integration supplies those inputs.
 - Delete intermediate files only after final export success.
 - Preserve source/intermediate files on failure.
 - Return user-displayable error categories.
@@ -664,6 +626,163 @@ Implementation requirements:
 ```bash
 git add QuickRecorder/RecordingCore/RecordingFinalizer.swift Tests/RecordingCoreTests/RecordingFinalizerTests.swift
 git commit -m "feat: add recording finalizer"
+```
+
+## 任务 6：实现完整 RecordingSession
+
+**文件：**
+- 创建：`QuickRecorder/RecordingCore/RecordingSession.swift`
+- 创建：`Tests/RecordingCoreTests/RecordingSessionTests.swift`
+
+- [ ] **步骤 1：写 session 行为测试**
+
+```swift
+import AVFoundation
+import CoreMedia
+import XCTest
+@testable import RecordingCore
+
+final class RecordingSessionTests: XCTestCase {
+    func testStopDurationIncludesTimeAfterLastFrame() {
+        var timeline = RecordingTimeline()
+        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
+        _ = timeline.presentationTime(for: CMTime(seconds: 20, preferredTimescale: 600))
+        XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 70, preferredTimescale: 600)).seconds, 60, accuracy: 0.001)
+    }
+
+    func testPauseResumeRemovesDuration() {
+        var timeline = RecordingTimeline()
+        _ = timeline.presentationTime(for: CMTime(seconds: 10, preferredTimescale: 600))
+        timeline.pause(at: CMTime(seconds: 20, preferredTimescale: 600))
+        timeline.resume(at: CMTime(seconds: 35, preferredTimescale: 600))
+        XCTAssertEqual(timeline.finalDuration(at: CMTime(seconds: 50, preferredTimescale: 600)).seconds, 25, accuracy: 0.001)
+    }
+
+    func testStopCallsFinalizerAfterWriterFinish() throws {
+        let finalizer = RecordingFinalizerSpy()
+        let writer = RecordingWriter(adapter: RecordingWriterTestAdapter())
+        let session = RecordingSession(configuration: .test(), finalizer: finalizer, writer: writer)
+        try session.start()
+        let completion = expectation(description: "stopped")
+
+        session.stop(at: CMTime(seconds: 3, preferredTimescale: 600)) { result in
+            guard case .success = result else {
+                return XCTFail("Expected successful stop")
+            }
+            completion.fulfill()
+        }
+
+        wait(for: [completion], timeout: 1)
+        XCTAssertEqual(finalizer.requests.count, 1)
+        XCTAssertEqual(finalizer.requests[0].finalDuration.seconds, 3, accuracy: 0.001)
+    }
+
+    func testAppendAfterStopIsRejected() throws {
+        let finalizer = RecordingFinalizerSpy()
+        let writer = RecordingWriter(adapter: RecordingWriterTestAdapter())
+        let session = RecordingSession(configuration: .test(), finalizer: finalizer, writer: writer)
+        try session.start()
+        let completion = expectation(description: "stopped")
+        session.stop(at: CMTime(seconds: 1, preferredTimescale: 600)) { _ in completion.fulfill() }
+        wait(for: [completion], timeout: 1)
+
+        session.appendSystemAudio(try makeAudioSample(at: CMTime(seconds: 2, preferredTimescale: 48_000)))
+
+        XCTAssertEqual(session.rejectedSampleCount, 1)
+    }
+
+    private func makeAudioSample(at presentationTime: CMTime) throws -> CMSampleBuffer {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+        buffer.frameLength = 480
+        return try XCTUnwrap(AudioSampleBufferFactory.makeSampleBuffer(from: buffer, presentationTime: presentationTime))
+    }
+}
+
+private final class RecordingFinalizerSpy: RecordingFinalizing {
+    private(set) var requests: [RecordingFinalizerRequest] = []
+
+    func finalize(_ request: RecordingFinalizerRequest, completion: @escaping (Result<RecordingOutput, Error>) -> Void) {
+        requests.append(request)
+        completion(.success(RecordingOutput(url: request.outputURL, duration: request.finalDuration)))
+    }
+}
+
+private extension RecordingSessionConfiguration {
+    static func test() -> RecordingSessionConfiguration {
+        RecordingSessionConfiguration(
+            writerConfiguration: RecordingWriterConfiguration(
+                outputURL: URL(fileURLWithPath: "/tmp/session.mov"),
+                fileType: .mov,
+                videoOutputSettings: nil,
+                systemAudioOutputSettings: nil,
+                micOutputSettings: nil
+            ),
+            finalizerMode: .videoWithoutRemux
+        )
+    }
+}
+```
+
+- [ ] **步骤 2：验证失败**
+
+运行：`rtk swift test --filter RecordingSessionTests`
+
+预期：FAIL，缺少 `RecordingSession`、`RecordingSessionConfiguration`、测试 spy 或 session API。
+
+- [ ] **步骤 3：实现 session**
+
+`RecordingSession` must:
+
+- Own `sessionQueue`.
+- Own `RecordingTimeline`.
+- Own `RecordingWriter`.
+- Own last complete video sample and last video presentation time.
+- Own `AECAudioClock`.
+- Expose async `start`, `appendVideo`, `appendSystemAudio`, `appendDefaultMicBuffer`, `appendAECMicBuffer`, `appendExternalMic`, `pause`, `resume`, `stop`.
+- Ensure timeline and last-frame mutations only happen on `sessionQueue`.
+- Reject all sample appends after stopping.
+- Call finalizer after writer finish.
+- Expose `rejectedSampleCount` for tests and diagnostics.
+- Provide an internal `init(configuration:finalizer:writer:)` for unit tests so tests can use `RecordingWriter(adapter: RecordingWriterTestAdapter())` instead of writing real files.
+
+Required public shape:
+
+```swift
+public final class RecordingSession {
+    public init(configuration: RecordingSessionConfiguration, finalizer: RecordingFinalizing)
+    public func start() throws
+    public func appendVideo(_ sampleBuffer: CMSampleBuffer)
+    public func appendSystemAudio(_ sampleBuffer: CMSampleBuffer)
+    public func appendDefaultMicBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime)
+    public func appendAECMicBuffer(_ buffer: AVAudioPCMBuffer)
+    public func appendExternalMic(_ sampleBuffer: CMSampleBuffer)
+    public func pause(at sourceTime: CMTime)
+    public func resume(at sourceTime: CMTime)
+    public func stop(at sourceTime: CMTime, completion: @escaping (Result<RecordingOutput, Error>) -> Void)
+}
+```
+
+Required configuration shape:
+
+```swift
+public struct RecordingSessionConfiguration {
+    public let writerConfiguration: RecordingWriterConfiguration
+    public let finalizerMode: RecordingFinalizerMode
+}
+```
+
+- [ ] **步骤 4：验证**
+
+运行：`rtk swift test`
+
+预期：PASS.
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add QuickRecorder/RecordingCore/RecordingSession.swift Tests/RecordingCoreTests/RecordingSessionTests.swift
+git commit -m "feat: add recording session"
 ```
 
 ## 任务 7：把 RecordingCore 加入 Xcode app target
