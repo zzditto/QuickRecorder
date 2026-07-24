@@ -38,12 +38,20 @@ public struct RecordingWriterSummary {
 
 struct RecordingWriterStateMachine {
     private enum State {
+        case idle
         case acceptingSamples
         case stopping
         case finished
     }
 
-    private var state: State = .acceptingSamples
+    private var state: State = .idle
+
+    var canStart: Bool {
+        if case .idle = state {
+            return true
+        }
+        return false
+    }
 
     var acceptsSamples: Bool {
         if case .acceptingSamples = state {
@@ -55,6 +63,11 @@ struct RecordingWriterStateMachine {
     mutating func beginStopping() {
         guard acceptsSamples else { return }
         state = .stopping
+    }
+
+    mutating func start() {
+        guard canStart else { return }
+        state = .acceptingSamples
     }
 
     mutating func finish() {
@@ -171,13 +184,20 @@ public final class RecordingWriter {
 
     public func start() throws {
         try writerQueue.sync {
+            guard state.canStart else {
+                throw RecordingWriterError.invalidStart
+            }
             try adapter.startWriting()
+            state.start()
         }
     }
 
     public func appendVideo(_ sampleBuffer: CMSampleBuffer) {
         writerQueue.async {
-            guard self.state.acceptsSamples else { return }
+            guard self.state.acceptsSamples else {
+                self.droppedVideoSampleCount += 1
+                return
+            }
             self.startSessionIfNeeded()
             guard self.adapter.isReadyForVideo, self.adapter.appendVideo(sampleBuffer) else {
                 self.droppedVideoSampleCount += 1
@@ -188,7 +208,10 @@ public final class RecordingWriter {
 
     public func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) {
         writerQueue.async {
-            guard self.state.acceptsSamples else { return }
+            guard self.state.acceptsSamples else {
+                self.droppedSystemAudioSampleCount += 1
+                return
+            }
             self.startSessionIfNeeded()
             guard self.adapter.isReadyForSystemAudio, self.adapter.appendSystemAudio(sampleBuffer) else {
                 self.droppedSystemAudioSampleCount += 1
@@ -199,7 +222,10 @@ public final class RecordingWriter {
 
     public func appendMic(_ sampleBuffer: CMSampleBuffer) {
         writerQueue.async {
-            guard self.state.acceptsSamples else { return }
+            guard self.state.acceptsSamples else {
+                self.droppedMicSampleCount += 1
+                return
+            }
             self.startSessionIfNeeded()
             guard self.adapter.isReadyForMic, self.adapter.appendMic(sampleBuffer) else {
                 self.droppedMicSampleCount += 1
@@ -214,7 +240,10 @@ public final class RecordingWriter {
         completion: @escaping (Result<RecordingWriterSummary, Error>) -> Void
     ) {
         writerQueue.sync {
-            guard self.state.acceptsSamples else { return }
+            guard self.state.acceptsSamples else {
+                self.complete(.failure(RecordingWriterError.invalidFinish), using: completion)
+                return
+            }
             self.state.beginStopping()
             if let tailVideoSample {
                 self.startSessionIfNeeded()
@@ -235,9 +264,7 @@ public final class RecordingWriter {
                     } else {
                         result = .success(self.makeSummary())
                     }
-                    DispatchQueue.main.async {
-                        completion(result)
-                    }
+                    self.complete(result, using: completion)
                 }
             }
         }
@@ -256,10 +283,21 @@ public final class RecordingWriter {
             droppedMicSampleCount: droppedMicSampleCount
         )
     }
+
+    private func complete(
+        _ result: Result<RecordingWriterSummary, Error>,
+        using completion: @escaping (Result<RecordingWriterSummary, Error>) -> Void
+    ) {
+        DispatchQueue.main.async {
+            completion(result)
+        }
+    }
 }
 
 private enum RecordingWriterError: Error {
     case failedToStart
+    case invalidStart
+    case invalidFinish
 }
 
 final class RecordingWriterTestAdapter: RecordingWriterAdapting {
@@ -276,7 +314,10 @@ final class RecordingWriterTestAdapter: RecordingWriterAdapting {
         record("startSession:\(time.seconds)")
     }
 
-    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
+    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        record("appendVideo")
+        return true
+    }
     func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
     func appendMic(_ sampleBuffer: CMSampleBuffer) -> Bool { true }
 
