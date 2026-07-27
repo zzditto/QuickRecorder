@@ -7,6 +7,10 @@ The current fork release includes the following fixes:
 - **Screen-capture permission**: Stop automatic retries after access is denied, preventing repeated permission prompts.
 - **Window selection**: Ignore stale mouse and completion events so a cancelled or superseded selection cannot affect a new selection.
 
+### Unsigned fork builds
+
+Use `scripts/create-adhoc-release.sh` to create an ad-hoc signed test build. Install the app in `/Applications` before granting Screen Recording permission. This is not a notarized public-distribution build; users must explicitly approve it in macOS security settings.
+
 #
 <p align="center">
 <img src="./QuickRecorder/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png" width="200" height="200" />

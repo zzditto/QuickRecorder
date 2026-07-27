@@ -30,6 +30,12 @@ public enum ScreenCaptureContentRefreshDecision: Equatable {
     case showPermissionGuide(status: ScreenCaptureContentStatus)
 }
 
+public enum ScreenCapturePermissionRequestDecision: Equatable {
+    case complete(status: ScreenCaptureContentStatus)
+    case requestSystemPermission
+    case showSettingsGuide
+}
+
 public enum ScreenCaptureContentRefreshPolicy {
     public static func decision(
         for status: ScreenCaptureContentStatus,
@@ -39,6 +45,24 @@ public enum ScreenCaptureContentRefreshPolicy {
             return .complete(status: status)
         }
         return .showPermissionGuide(status: status)
+    }
+}
+
+public enum ScreenCapturePermissionRequestPolicy {
+    public static func decision(
+        isAuthorized: Bool,
+        origin: ScreenCaptureContentRequestOrigin,
+        hasRequestedPermission: Bool
+    ) -> ScreenCapturePermissionRequestDecision {
+        guard !isAuthorized else {
+            return .complete(status: .available)
+        }
+
+        guard origin == .userInitiated else {
+            return .complete(status: .accessDenied)
+        }
+
+        return hasRequestedPermission ? .showSettingsGuide : .requestSystemPermission
     }
 }
 

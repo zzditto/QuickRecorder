@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.2 — 2026-07-27
+
+### Fixed
+
+- On the first user-initiated screen-capture request, use only the native macOS permission prompt.
+- Show the app's Settings guide only after permission was previously requested and remains unavailable.
+- Removed forced app termination after opening Screen Recording settings.
+- Use a fork-specific bundle identifier and provide an ad-hoc signed release build script for testing without a Developer ID.
+
 ## 1.7.1 — 2026-07-27
 
 ### Fixed

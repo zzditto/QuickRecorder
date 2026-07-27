@@ -7,6 +7,7 @@
 
 import AVFAudio
 import AVFoundation
+import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 import UserNotifications
@@ -43,6 +44,7 @@ class SCContext {
     static var availableContent: SCShareableContent?
     static let excludedApps = ["", "com.apple.dock", "com.apple.screencaptureui", "com.apple.controlcenter", "com.apple.notificationcenterui", "com.apple.systemuiserver", "com.apple.WindowManager", "dev.mnpn.Azayaka", "com.gaosun.eul", "com.pointum.hazeover", "net.matthewpalmer.Vanilla", "com.dwarvesv.minimalbar", "com.bjango.istatmenus.status"]
     private static let permissionPromptGate = ScreenCapturePermissionPromptGate()
+    private static let hasRequestedScreenCapturePermissionKey = "hasRequestedScreenCapturePermission"
     
     private static func fetchAvailableContent(
         onScreenWindowsOnly: Bool,
@@ -73,10 +75,38 @@ class SCContext {
         request: ScreenCaptureContentRefreshRequest,
         completion: @escaping (ScreenCaptureContentStatus) -> Void
     ) {
+        let permissionDecision = ScreenCapturePermissionRequestPolicy.decision(
+            isAuthorized: CGPreflightScreenCaptureAccess(),
+            origin: request.origin,
+            hasRequestedPermission: ud.bool(forKey: hasRequestedScreenCapturePermissionKey)
+        )
+
+        switch permissionDecision {
+        case let .complete(status):
+            guard status == .available else {
+                completion(status)
+                return
+            }
+        case .requestSystemPermission:
+            ud.set(true, forKey: hasRequestedScreenCapturePermissionKey)
+            requestSystemScreenCapturePermission(
+                onScreenWindowsOnly: request.onScreenWindowsOnly,
+                completion: completion
+            )
+            return
+        case .showSettingsGuide:
+            showScreenCaptureSettingsGuide()
+            completion(.accessDenied)
+            return
+        case .complete(status: .available):
+            break
+        }
+
         fetchAvailableContent(onScreenWindowsOnly: request.onScreenWindowsOnly) { _, status in
             let decision = ScreenCaptureContentRefreshPolicy.decision(for: status, origin: request.origin)
             if case .showPermissionGuide = decision {
-                requestPermissions()
+                ud.set(true, forKey: hasRequestedScreenCapturePermissionKey)
+                showScreenCaptureSettingsGuide()
             }
             completion(status)
         }
@@ -248,7 +278,23 @@ class SCContext {
         }
     }
     
-    private static func requestPermissions() {
+    private static func requestSystemScreenCapturePermission(
+        onScreenWindowsOnly: Bool,
+        completion: @escaping (ScreenCaptureContentStatus) -> Void
+    ) {
+        DispatchQueue.main.async {
+            guard CGRequestScreenCaptureAccess() else {
+                completion(.accessDenied)
+                return
+            }
+
+            fetchAvailableContent(onScreenWindowsOnly: onScreenWindowsOnly) { _, status in
+                completion(status)
+            }
+        }
+    }
+
+    private static func showScreenCaptureSettingsGuide() {
         guard permissionPromptGate.acquire() else { return }
 
         DispatchQueue.main.async {
@@ -261,7 +307,6 @@ class SCContext {
             if alert.runModal() == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
             }
-            NSApp.terminate(self)
         }
     }
     

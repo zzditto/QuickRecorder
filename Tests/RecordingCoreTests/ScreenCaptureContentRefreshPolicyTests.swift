@@ -38,6 +38,50 @@ final class ScreenCaptureContentRefreshPolicyTests: XCTestCase {
         )
     }
 
+    func testAutomaticRequestWithMissingPermissionCompletesWithoutPrompt() {
+        XCTAssertEqual(
+            ScreenCapturePermissionRequestPolicy.decision(
+                isAuthorized: false,
+                origin: .automatic,
+                hasRequestedPermission: false
+            ),
+            .complete(status: .accessDenied)
+        )
+    }
+
+    func testFirstUserInitiatedRequestUsesOnlyTheSystemPrompt() {
+        XCTAssertEqual(
+            ScreenCapturePermissionRequestPolicy.decision(
+                isAuthorized: false,
+                origin: .userInitiated,
+                hasRequestedPermission: false
+            ),
+            .requestSystemPermission
+        )
+    }
+
+    func testPreviouslyDeniedUserInitiatedRequestShowsSettingsGuide() {
+        XCTAssertEqual(
+            ScreenCapturePermissionRequestPolicy.decision(
+                isAuthorized: false,
+                origin: .userInitiated,
+                hasRequestedPermission: true
+            ),
+            .showSettingsGuide
+        )
+    }
+
+    func testAuthorizedRequestCompletesWithoutPermissionUI() {
+        XCTAssertEqual(
+            ScreenCapturePermissionRequestPolicy.decision(
+                isAuthorized: true,
+                origin: .userInitiated,
+                hasRequestedPermission: true
+            ),
+            .complete(status: .available)
+        )
+    }
+
     func testFirstSelectorLoadUsesUserInitiatedOrigin() {
         XCTAssertEqual(
             ScreenCaptureSelectionSessionCoordinator.firstLoadRequest.origin,

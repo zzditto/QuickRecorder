@@ -7,6 +7,10 @@
 - **屏幕录制权限**: 拒绝权限后不再自动重试，避免权限提示框重复弹出。
 - **窗口选择**: 忽略过期的鼠标与异步完成事件，避免已取消或被替换的选择影响新的选择操作。
 
+### 未签名 Fork 构建
+
+使用 `scripts/create-adhoc-release.sh` 创建 ad-hoc 签名测试包。授予“屏幕录制”权限前，请先将 App 安装到 `/Applications`。该构建未经过 Apple 公证，用户需要在 macOS 安全设置中手动确认打开。
+
 # 
 <p align="center">
 <img src="./QuickRecorder/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png" width="200" height="200" />

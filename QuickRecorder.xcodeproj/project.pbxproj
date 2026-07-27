@@ -7,14 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		18RC10012F00000100000001 /* RecordingTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00012F00000100000001 /* RecordingTimeline.swift */; };
-		18RC10022F00000100000002 /* SampleRetiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00022F00000100000002 /* SampleRetiming.swift */; };
-		18RC10032F00000100000003 /* AudioSampleBufferFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */; };
-		18RC10042F00000100000004 /* AECAudioClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00042F00000100000004 /* AECAudioClock.swift */; };
-		18RC10052F00000100000005 /* RecordingWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00052F00000100000005 /* RecordingWriter.swift */; };
-		18RC10082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift */; };
-		18RC10062F00000100000006 /* RecordingFinalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00062F00000100000006 /* RecordingFinalizer.swift */; };
-		18RC10072F00000100000007 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00072F00000100000007 /* RecordingSession.swift */; };
 		181724052BE3BEA600F5F539 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 181724042BE3BEA600F5F539 /* Sparkle */; };
 		1821F2E82CF4B226004A2EC0 /* ContentViewNew.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1821F2E72CF4B226004A2EC0 /* ContentViewNew.swift */; };
 		184506CE2C69213400AFDA45 /* MatrixColorSelector in Frameworks */ = {isa = PBXBuildFile; productRef = 184506CD2C69213400AFDA45 /* MatrixColorSelector */; };
@@ -53,17 +45,17 @@
 		18FEBDAC2BD01E82003F09BC /* WinSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18FEBDAB2BD01E82003F09BC /* WinSelector.swift */; };
 		18FEBDAE2BD10ED1003F09BC /* ScreenSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18FEBDAD2BD10ED1003F09BC /* ScreenSelector.swift */; };
 		18FEBDB02BD2C0D1003F09BC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18FEBDAF2BD2C0D1003F09BC /* SettingsView.swift */; };
+		18RC10012F00000100000001 /* RecordingTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00012F00000100000001 /* RecordingTimeline.swift */; };
+		18RC10022F00000100000002 /* SampleRetiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00022F00000100000002 /* SampleRetiming.swift */; };
+		18RC10032F00000100000003 /* AudioSampleBufferFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */; };
+		18RC10042F00000100000004 /* AECAudioClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00042F00000100000004 /* AECAudioClock.swift */; };
+		18RC10052F00000100000005 /* RecordingWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00052F00000100000005 /* RecordingWriter.swift */; };
+		18RC10062F00000100000006 /* RecordingFinalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00062F00000100000006 /* RecordingFinalizer.swift */; };
+		18RC10072F00000100000007 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00072F00000100000007 /* RecordingSession.swift */; };
+		18RC10082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18RC00082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		18RC00012F00000100000001 /* RecordingTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTimeline.swift; sourceTree = "<group>"; };
-		18RC00022F00000100000002 /* SampleRetiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleRetiming.swift; sourceTree = "<group>"; };
-		18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleBufferFactory.swift; sourceTree = "<group>"; };
-		18RC00042F00000100000004 /* AECAudioClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AECAudioClock.swift; sourceTree = "<group>"; };
-		18RC00052F00000100000005 /* RecordingWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingWriter.swift; sourceTree = "<group>"; };
-		18RC00082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureContentRefreshPolicy.swift; sourceTree = "<group>"; };
-		18RC00062F00000100000006 /* RecordingFinalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizer.swift; sourceTree = "<group>"; };
-		18RC00072F00000100000007 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
 		1821F2E72CF4B226004A2EC0 /* ContentViewNew.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewNew.swift; sourceTree = "<group>"; };
 		184CAEC62BDCCC2300D61D57 /* AVContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVContext.swift; sourceTree = "<group>"; };
 		184CAEC82BDDEC6800D61D57 /* AppBlockSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBlockSelector.swift; sourceTree = "<group>"; };
@@ -107,6 +99,14 @@
 		18FEBDAB2BD01E82003F09BC /* WinSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WinSelector.swift; sourceTree = "<group>"; };
 		18FEBDAD2BD10ED1003F09BC /* ScreenSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSelector.swift; sourceTree = "<group>"; };
 		18FEBDAF2BD2C0D1003F09BC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		18RC00012F00000100000001 /* RecordingTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTimeline.swift; sourceTree = "<group>"; };
+		18RC00022F00000100000002 /* SampleRetiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleRetiming.swift; sourceTree = "<group>"; };
+		18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleBufferFactory.swift; sourceTree = "<group>"; };
+		18RC00042F00000100000004 /* AECAudioClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AECAudioClock.swift; sourceTree = "<group>"; };
+		18RC00052F00000100000005 /* RecordingWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingWriter.swift; sourceTree = "<group>"; };
+		18RC00062F00000100000006 /* RecordingFinalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFinalizer.swift; sourceTree = "<group>"; };
+		18RC00072F00000100000007 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
+		18RC00082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureContentRefreshPolicy.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -125,21 +125,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		18RC99992F00000100000099 /* RecordingCore */ = {
-			isa = PBXGroup;
-			children = (
-				18RC00012F00000100000001 /* RecordingTimeline.swift */,
-				18RC00022F00000100000002 /* SampleRetiming.swift */,
-				18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */,
-				18RC00042F00000100000004 /* AECAudioClock.swift */,
-				18RC00052F00000100000005 /* RecordingWriter.swift */,
-				18RC00082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift */,
-				18RC00062F00000100000006 /* RecordingFinalizer.swift */,
-				18RC00072F00000100000007 /* RecordingSession.swift */,
-			);
-			path = RecordingCore;
-			sourceTree = "<group>";
-		};
 		181724062BE3BF2000F5F539 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -229,6 +214,21 @@
 				18CEED912D08312C00FBC4BF /* PreviewView.swift */,
 			);
 			path = ViewModel;
+			sourceTree = "<group>";
+		};
+		18RC99992F00000100000099 /* RecordingCore */ = {
+			isa = PBXGroup;
+			children = (
+				18RC00012F00000100000001 /* RecordingTimeline.swift */,
+				18RC00022F00000100000002 /* SampleRetiming.swift */,
+				18RC00032F00000100000003 /* AudioSampleBufferFactory.swift */,
+				18RC00042F00000100000004 /* AECAudioClock.swift */,
+				18RC00052F00000100000005 /* RecordingWriter.swift */,
+				18RC00082F00000100000008 /* ScreenCaptureContentRefreshPolicy.swift */,
+				18RC00062F00000100000006 /* RecordingFinalizer.swift */,
+				18RC00072F00000100000007 /* RecordingSession.swift */,
+			);
+			path = RecordingCore;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -526,9 +526,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = QuickRecorder/QuickRecorder.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 171;
+				CURRENT_PROJECT_VERSION = 172;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"QuickRecorder/Preview Content\"";
 				DEVELOPMENT_TEAM = "";
@@ -547,8 +547,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.3;
-				MARKETING_VERSION = 1.7.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.lihaoyun6.QuickRecorder;
+				MARKETING_VERSION = 1.7.2;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.zzditto.QuickRecorder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -563,9 +563,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = QuickRecorder/QuickRecorder.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 171;
+				CURRENT_PROJECT_VERSION = 172;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"QuickRecorder/Preview Content\"";
 				DEVELOPMENT_TEAM = "";
@@ -584,8 +584,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.3;
-				MARKETING_VERSION = 1.7.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.lihaoyun6.QuickRecorder;
+				MARKETING_VERSION = 1.7.2;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.zzditto.QuickRecorder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;

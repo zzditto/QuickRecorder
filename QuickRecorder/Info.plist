@@ -34,7 +34,7 @@
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.lihaoyun6.QuickRecorder.qma</string>
+				<string>io.github.zzditto.QuickRecorder.qma</string>
 			</array>
 			<key>LSTypeIsPackage</key>
 			<true/>
@@ -63,7 +63,7 @@
 				<string>qmaIcon</string>
 			</dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.lihaoyun6.QuickRecorder.qma</string>
+			<string>io.github.zzditto.QuickRecorder.qma</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
