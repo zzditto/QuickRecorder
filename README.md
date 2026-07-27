@@ -1,8 +1,11 @@
-## Bug Fixes (Fork Version)
-This fork version fixes the following issues:
+## Fork Release Fixes
+The current fork release includes the following fixes:
 - **Audio sampling rate compatibility**: Auto-limit sampling rate to 48000 Hz when exceeding AAC encoder limit (e.g., 96000 Hz)
 - **Audio settings crash**: Add default value handling for empty/invalid audio format settings
 - **Enhanced error handling**: Replace force unwraps with safe error handling to avoid crashes
+- **Recording stability**: Harden the recording lifecycle, sample timing, and audio remuxing to reduce failed or incomplete recordings.
+- **Screen-capture permission**: Stop automatic retries after access is denied, preventing repeated permission prompts.
+- **Window selection**: Ignore stale mouse and completion events so a cancelled or superseded selection cannot affect a new selection.
 
 #
 <p align="center">
